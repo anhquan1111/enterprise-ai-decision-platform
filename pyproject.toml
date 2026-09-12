@@ -23,6 +23,7 @@ dependencies = [
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-timeout>=2.3.0",
     "ruff>=0.7.0",
     "mypy>=1.13.0",
     "types-pyyaml>=6.0.12",
@@ -54,6 +55,9 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# A test that waits forever is a failure, not a test still running. 30s is far
+# above any legitimate test here, so only a genuine hang trips it.
+timeout = 30
 markers = [
     "integration: needs a running PostgreSQL (skipped by default in CI lint job)",
 ]

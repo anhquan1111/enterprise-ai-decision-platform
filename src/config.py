@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     postgres_db: str = "enterprise_ai"
     postgres_user: str = "app"
     postgres_password: str = "app_local_only"
+    # Seconds libpq waits per resolved address before giving up. Without it the
+    # default is "wait indefinitely", which turns an unreachable database into a
+    # hang rather than an error — see docs/decisions.md ADR-005.
+    postgres_connect_timeout: int = 5
 
     # ── LLM (chosen on D2 — see docs/decisions.md ADR-002) ──
     llm_provider: str = "unset"
@@ -54,10 +58,15 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
-        """libpq connection string for psycopg."""
+        """libpq connection string for psycopg.
+
+        Always carries connect_timeout: a database that cannot be reached must
+        fail within a bounded time instead of blocking the caller.
+        """
         return (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+            f"?connect_timeout={self.postgres_connect_timeout}"
         )
 
 

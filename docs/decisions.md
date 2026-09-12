@@ -130,18 +130,36 @@ still does not finish within 240s; with `127.0.0.1` it passes in 0.44s.
    `connect_timeout=5` it burns the full 5s rather than the 2s, proving the wait
    is bounded by the timeout, not by the refusal.
 
-**Still not explained.** A per-connection penalty of a few seconds does not by
-itself account for a test that runs past 240s over two connections. The remaining
-multiplier has not been isolated. What is established is the direction — the name
-`localhost` costs seconds per connection and the literal IPv4 address costs
-nothing — and that is enough to justify the decision.
+**Confirmed by the fix.** Adding `connect_timeout=5` to the DSN turned the same
+`localhost` run from "does not finish in 240s" into **10.91s, 1 passed** — the test
+opens two connections, and 2 × 5s is the whole cost. The penalty is therefore
+per-connection and linear, and the original runaway was that same penalty with **no
+ceiling**, because libpq with no `connect_timeout` waits on the operating system
+rather than on a bound of its own.
+
+This also means the raw-socket measurement above (refused after 2.04s) was
+measuring something narrower than libpq's connect path: a single socket's
+refusal, not what libpq does while walking the address list. Why libpq's attempt
+on `::1` is not ended by that refusal is the one piece still not isolated — and it
+no longer matters operationally, because the timeout bounds it.
 
 **Decision.** Default `POSTGRES_HOST` to `127.0.0.1` in both `src/config.py` and
 `.env.example`. Keep the explicit IPv4 binding in compose: binding to all
 interfaces would hide this and would also expose the database beyond the host.
 
-**Consequence and the general lesson.** The connection string carries no
-`connect_timeout`, so a connection that cannot be made waits instead of failing.
-**A missing timeout converts a fast error into an unbounded wait** — the same
-property that makes timeouts a design concern for every outbound call in this
-system, not a tuning detail.
+**Follow-on decisions, both applied.**
+
+1. `database_url` always appends `connect_timeout` (default 5s,
+   `POSTGRES_CONNECT_TIMEOUT`). Verified against an unroutable address
+   (`192.0.2.1`, TEST-NET-1): fails in **5.08s** with `ConnectionTimeout` instead
+   of blocking.
+2. `pytest-timeout` with a 30s per-test limit. Verified with a deliberate 10s
+   sleep under `@pytest.mark.timeout(2)`: the run is cut and reported as a
+   failure.
+
+**The general lesson.** A missing timeout converts a fast error into an unbounded
+wait, and a test with no time limit reports a hang as "still running" rather than
+as a failure. Neither is a tuning detail: together they decide whether a fault
+shows up as a clear error in seconds or as a frozen terminal. Every outbound call
+added to this system later — LLM API, embedding service, reranker — gets a timeout
+at the point it is written, not after it hangs once.

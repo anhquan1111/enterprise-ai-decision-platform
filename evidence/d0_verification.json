@@ -68,6 +68,11 @@
       "what": "Live POST /ask, unknown role",
       "command": "curl -X POST /ask with role=ceo_of_everything",
       "result": "422 — rejected at the contract, never reached the data layer"
+    },
+    {
+      "what": "Unit tests after follow-on fixes",
+      "command": "uv run pytest tests/ -m \"not integration\"",
+      "result": "8 passed, 1 deselected (timeout plugin active, limit 30.0s)"
     }
   ],
   "not_done": [
@@ -92,9 +97,23 @@
       "psycopg_127_0_0_1": "succeeded in 0.04s",
       "mechanism": "libpq tries resolved addresses in order and applies connect_timeout per address; the dead IPv6 address is paid for on every new connection"
     },
-    "still_unexplained": "A few seconds per connection over two connections does not account for >240s; the remaining multiplier was not isolated",
     "fix": "POSTGRES_HOST defaults to 127.0.0.1 in src/config.py and .env.example",
     "general_lesson": "The DSN has no connect_timeout, so a failed connection waits instead of erroring - a missing timeout turns a fast error into an unbounded wait",
-    "recorded_as": "docs/decisions.md ADR-005 (corrected)"
+    "recorded_as": "docs/decisions.md ADR-005 (corrected)",
+    "confirmed_by_fix": {
+      "localhost_after_connect_timeout": "10.91s, 1 passed (was: not finished in 240s)",
+      "interpretation": "two connections x 5s timeout; the penalty is per-connection and linear, and the original runaway was the same penalty with no ceiling",
+      "remaining_unknown": "why libpq's ::1 attempt is not ended by the refusal a raw socket sees in 2.04s; bounded by the timeout now, so not operationally relevant"
+    },
+    "follow_on_fixes": [
+      {
+        "what": "database_url always appends connect_timeout (default 5s, POSTGRES_CONNECT_TIMEOUT)",
+        "verified": "psycopg to 192.0.2.1 (TEST-NET-1, unroutable) fails in 5.08s with ConnectionTimeout instead of blocking"
+      },
+      {
+        "what": "pytest-timeout 2.4.0, 30s per-test limit in pyproject",
+        "verified": "a deliberate 10s sleep under @pytest.mark.timeout(2) is cut and reported as a failure"
+      }
+    ]
   }
 }
