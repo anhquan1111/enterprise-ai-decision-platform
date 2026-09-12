@@ -1,0 +1,42 @@
+# ── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ── Tooling caches ──────────────────────────────────────────
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ── Secrets — NEVER commit ──────────────────────────────────
+.env
+.env.local
+*.pem
+*.key
+
+# ── Data: synthetic corpus is generated, not committed ──────
+data/raw/
+data/processed/
+*.parquet
+
+# ── MLflow (eval run tracking) ──────────────────────────────
+mlruns/
+mlflow.db
+
+# ── Local model cache (embeddings / reranker) ───────────────
+models/
+.cache/
+
+# ── OS / editor ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# NOTE: eval/ and evidence/ ARE committed on purpose.
+# The eval set is ground truth and the evidence files are the proof
+# behind every number in the README. See docs/decisions.md (ADR-003).

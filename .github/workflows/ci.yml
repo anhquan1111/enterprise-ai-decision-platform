@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  UV_VERSION: "0.11.13"
+
+jobs:
+  ci:
+    name: Lint · Types · Test
+    runs-on: ubuntu-latest
+
+    steps:
+      # ------------------------------------------------------------------ #
+      # 1. Checkout
+      # ------------------------------------------------------------------ #
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------ #
+      # 2. Python + uv
+      # ------------------------------------------------------------------ #
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      # ------------------------------------------------------------------ #
+      # 3. Cache the virtualenv against uv.lock
+      # ------------------------------------------------------------------ #
+      - name: Cache uv virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            venv-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-
+
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+
+      # ------------------------------------------------------------------ #
+      # 4. Lint and format
+      # ------------------------------------------------------------------ #
+      - name: Ruff lint
+        run: uv run ruff check src/ tests/ scripts/
+
+      - name: Ruff format check
+        run: uv run ruff format --check src/ tests/ scripts/
+
+      # ------------------------------------------------------------------ #
+      # 5. Static types
+      # ------------------------------------------------------------------ #
+      - name: Mypy
+        run: uv run mypy src/
+
+      # ------------------------------------------------------------------ #
+      # 6. Tests
+      #    Integration tests need PostgreSQL and are excluded here; a job with a
+      #    postgres service is added on D1 when the schema exists.
+      # ------------------------------------------------------------------ #
+      - name: Pytest
+        run: uv run pytest tests/ -v --tb=short -m "not integration"

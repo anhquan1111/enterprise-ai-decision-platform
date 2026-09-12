@@ -1,0 +1,26 @@
+"""Tests for configuration handling."""
+
+from src.config import Settings
+
+
+def test_database_url_is_built_from_parts() -> None:
+    """The connection string must be assembled from the individual settings.
+
+    Keeping host/port/db separate (instead of one DATABASE_URL string) is what
+    lets compose override only POSTGRES_HOST for the container network while the
+    host-side defaults stay untouched.
+    """
+    settings = Settings(
+        postgres_host="db",
+        postgres_port=5432,
+        postgres_db="enterprise_ai",
+        postgres_user="app",
+        postgres_password="secret",
+    )
+
+    assert settings.database_url == "postgresql://app:secret@db:5432/enterprise_ai"
+
+
+def test_api_key_defaults_to_empty_not_placeholder() -> None:
+    """A missing key must be empty so it fails loudly, not a fake-looking value."""
+    assert Settings().llm_api_key == ""

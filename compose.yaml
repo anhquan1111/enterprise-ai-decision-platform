@@ -1,0 +1,68 @@
+name: enterprise-ai-platform
+
+services:
+  # ── PostgreSQL + pgvector ──────────────────────────────────
+  # One database serves three jobs: business tables (SQL tool),
+  # document chunks + embeddings (retrieval tool), and the audit log.
+  # See docs/decisions.md ADR-001 for why not a separate vector DB.
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-enterprise_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_local_only}
+    ports:
+      # Host 5433 — 5432 and 5546 are already taken by other local labs.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      # Named volume, not a bind mount: Postgres data files stay inside the
+      # Linux VM, so DB I/O is not slowed down by the Windows filesystem.
+      - db-data:/var/lib/postgresql/data
+      # sql/ is mounted read-only so schema files can be applied with psql
+      # without rebuilding anything.
+      - ./sql:/sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-enterprise_ai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - platform
+
+  # ── API ────────────────────────────────────────────────────
+  # For day-to-day development run uvicorn on the host instead
+  # (uv run uvicorn src.api:app --reload --port 8010) and keep only `db` up.
+  # This service exists so the whole system starts with one command for the demo.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: enterprise-ai-api:local
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      # Inside the compose network the DB is reachable by service name on 5432.
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-enterprise_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_local_only}
+      LLM_PROVIDER: ${LLM_PROVIDER:-unset}
+      LLM_MODEL: ${LLM_MODEL:-unset}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+    ports:
+      - "127.0.0.1:8010:8010"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - platform
+
+networks:
+  platform:
+    name: enterprise-ai-platform
+
+volumes:
+  db-data:

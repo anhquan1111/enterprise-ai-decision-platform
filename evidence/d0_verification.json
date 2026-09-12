@@ -1,0 +1,87 @@
+{
+  "session": "D0",
+  "date": "2026-09-12",
+  "host": "Windows 11, Docker Desktop (linux containers), uv 0.11.13, Python 3.12.4",
+  "status": "all checks run for real on this machine; no illustrative output",
+  "checks": [
+    {
+      "what": "Dependency install",
+      "command": "uv sync --extra dev",
+      "result": "ok — lockfile created, 8 source files visible to tooling"
+    },
+    {
+      "what": "Lint",
+      "command": "uv run ruff check src/ tests/",
+      "result": "All checks passed!"
+    },
+    {
+      "what": "Format",
+      "command": "uv run ruff format --check src/ tests/",
+      "result": "8 files already formatted"
+    },
+    {
+      "what": "Static types",
+      "command": "uv run mypy src/",
+      "result": "Success: no issues found in 5 source files"
+    },
+    {
+      "what": "Unit tests",
+      "command": "uv run pytest tests/ -m \"not integration\"",
+      "result": "6 passed, 1 deselected"
+    },
+    {
+      "what": "Database container",
+      "command": "docker compose up -d db",
+      "result": "healthy on first healthcheck attempt; pgvector/pgvector:pg17"
+    },
+    {
+      "what": "Extensions",
+      "command": "psql -f /sql/00_extensions.sql",
+      "result": "vector 0.8.6, pg_trgm 1.6, plpgsql 1.0"
+    },
+    {
+      "what": "pgvector operator",
+      "command": "SELECT '[1,2,3]'::vector <=> '[1,2,4]'::vector",
+      "result": "0.00853986601633272"
+    },
+    {
+      "what": "Integration test",
+      "command": "uv run pytest tests/ -m integration",
+      "result": "1 passed in 0.44s (hung indefinitely before the ADR-005 fix)"
+    },
+    {
+      "what": "Live GET /health",
+      "command": "uvicorn src.api:app --port 8010",
+      "result": "200 {\"status\":\"ok\",\"app\":\"enterprise-ai-decision-platform\",\"version\":\"0.1.0\",\"environment\":\"local\"}"
+    },
+    {
+      "what": "Live GET /ready",
+      "command": "curl http://127.0.0.1:8010/ready",
+      "result": "200 ready=true, postgres ok (PostgreSQL 17.11 Debian 17.11-1.pgdg12+2)"
+    },
+    {
+      "what": "Live POST /ask, valid payload",
+      "command": "curl -X POST /ask with role=employee",
+      "result": "501 — not implemented, as designed for D0"
+    },
+    {
+      "what": "Live POST /ask, unknown role",
+      "command": "curl -X POST /ask with role=ceo_of_everything",
+      "result": "422 — rejected at the contract, never reached the data layer"
+    }
+  ],
+  "not_done": [
+    "No business schema yet (D1)",
+    "No retrieval, no embeddings, no LLM call (D2)",
+    "No eval set and therefore no quality numbers of any kind",
+    "No RBAC enforcement yet — only the role field in the contract (D4)",
+    "Not deployed anywhere; local Docker Compose only"
+  ],
+  "bug_found_and_fixed": {
+    "symptom": "Integration test hung instead of failing",
+    "cause": "localhost resolves to ::1 first on this host; compose binds 127.0.0.1 only (IPv4), so the IPv6 attempt stalled",
+    "evidence": "Test-NetConnection ::1 -Port 5433 -> False; 127.0.0.1 -> True",
+    "fix": "POSTGRES_HOST defaults to 127.0.0.1 in src/config.py and .env.example",
+    "recorded_as": "docs/decisions.md ADR-005"
+  }
+}
