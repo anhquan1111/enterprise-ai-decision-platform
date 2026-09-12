@@ -132,7 +132,14 @@ uv run mypy src/
 
 Chi tiết và phần chưa giải thích được: `docs/decisions.md` ADR-005.
 
-**Bài học tổng quát, quan trọng hơn bản thân con bug:** DSN không có `connect_timeout` nên lỗi kết nối biến thành **chờ vô hạn** thay vì báo lỗi. Thiếu timeout làm một lỗi nhanh thành một treo không giới hạn — áp dụng cho mọi lời gọi ra ngoài trong project này, không riêng DB.
+**Đã sửa, và đây là bài học quan trọng hơn bản thân con bug.** Nguyên nhân khiến lỗi biến thành *treo* thay vì *báo lỗi* là DSN không có `connect_timeout` — libpq mặc định chờ vô hạn. Hai thứ đã thêm:
+
+- `database_url` luôn gắn `connect_timeout` (mặc định 5s, đổi qua `POSTGRES_CONNECT_TIMEOUT`). Kiểm chứng với địa chỉ không routable `192.0.2.1`: fail sau **5,08s** kèm `ConnectionTimeout`, không đứng.
+- `pytest-timeout`, giới hạn **30s mỗi test**. Kiểm chứng bằng một test `sleep(10)` dưới `@pytest.mark.timeout(2)`: bị cắt và báo fail.
+
+Sau khi thêm timeout, chạy lại với `POSTGRES_HOST=localhost` mất **10,91s** (2 connection × 5s) thay vì không xong trong 240s — tức chi phí là per-connection và tuyến tính.
+
+**Quy tắc rút ra, áp cho mọi lời gọi ra ngoài thêm vào sau này** (LLM API, embedding, reranker): đặt timeout **ngay lúc viết**, không đợi nó treo một lần rồi mới thêm. Thiếu timeout làm một lỗi nhanh thành treo vô hạn; test không có giới hạn thời gian thì báo treo thành "đang chạy" chứ không phải "fail".
 
 ### Git Bash mangle đường dẫn Unix trong `docker compose exec`
 
