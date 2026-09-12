@@ -126,7 +126,13 @@ uv run mypy src/
 
 ### Dùng `127.0.0.1`, không dùng `localhost`
 
-Trên Windows `localhost` resolve `::1` trước `127.0.0.1`, còn compose publish port ở `127.0.0.1:5433:5432` (chỉ IPv4). Client thử IPv6 trước và **treo** thay vì báo lỗi. Integration test từng hang vô hạn vì đúng lỗi này, sửa xong pass trong 0,44s. Chi tiết: `docs/decisions.md` ADR-005.
+`getaddrinfo("localhost")` trên máy này trả `::1` **trước** `127.0.0.1`, còn compose publish port ở `127.0.0.1:5433:5432` (chỉ IPv4) nên `[::1]:5433` không có ai listen. libpq thử các địa chỉ **theo thứ tự** và áp `connect_timeout` cho **từng địa chỉ**, nên mỗi connection phải trả giá cho lần thử IPv6 thất bại trước khi fallback.
+
+Đo được: `psycopg.connect` tới `localhost` mất **5,08s** với `connect_timeout=5` (đúng bằng timeout), tới `127.0.0.1` mất **0,04s**. Integration test với `localhost` không xong trong 240s; với `127.0.0.1` pass 0,44s.
+
+Chi tiết và phần chưa giải thích được: `docs/decisions.md` ADR-005.
+
+**Bài học tổng quát, quan trọng hơn bản thân con bug:** DSN không có `connect_timeout` nên lỗi kết nối biến thành **chờ vô hạn** thay vì báo lỗi. Thiếu timeout làm một lỗi nhanh thành một treo không giới hạn — áp dụng cho mọi lời gọi ra ngoài trong project này, không riêng DB.
 
 ### Git Bash mangle đường dẫn Unix trong `docker compose exec`
 

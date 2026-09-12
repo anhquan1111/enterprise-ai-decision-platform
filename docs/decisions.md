@@ -97,18 +97,51 @@ withheld) without triggering a restart loop.
 
 ## ADR-005 — Database host defaults to `127.0.0.1`, never `localhost`
 
-**Date:** D0 · **Status:** accepted, found by measurement
+**Date:** D0 · **Status:** accepted, cause established by measurement
 
-**Context.** The first run of the integration test hung instead of failing.
+> **Correction.** The first version of this record blamed "the IPv6 attempt
+> stalls", citing a `Test-NetConnection ::1` probe. That probe was unreliable (it
+> returned `NotConnected` in 0.02s, which is not a connect result), and the
+> explanation was wrong. The measurements below replace it.
 
-**Diagnosis.** On this Windows host, `localhost` resolves to `::1` (AAAA) before
-`127.0.0.1` (A), while compose publishes the port as `127.0.0.1:5433:5432` — IPv4
-only. `Test-NetConnection ::1 -Port 5433` returns false, `127.0.0.1` returns true.
-The client attempted IPv6 first and stalled.
+**Context.** The integration test did not finish instead of failing fast.
+Reproduced deliberately afterwards: with `POSTGRES_HOST=localhost` the same test
+still does not finish within 240s; with `127.0.0.1` it passes in 0.44s.
+
+**What was measured.**
+
+| Probe | Result |
+|---|---|
+| `socket.getaddrinfo("localhost", 5433)` | returns `AF_INET6 ::1` **first**, then `AF_INET 127.0.0.1` |
+| `Get-NetTCPConnection -LocalPort 5433 -State Listen` | one listener, `127.0.0.1` only — nothing on `[::1]` |
+| raw Python `connect(("::1", 5433))` | `ConnectionRefusedError` after **2.04s** — refused, but not promptly |
+| raw Python `connect(("127.0.0.1", 5433))` | connected in **0.000s** |
+| `psycopg.connect(...@localhost...?connect_timeout=5)` | **succeeds in 5.08s** — exactly the timeout |
+| `psycopg.connect(...@127.0.0.1...)` | succeeds in **0.04s** |
+
+**Cause.** Three things compose into one slow path:
+
+1. `localhost` is a name, and on this host it resolves IPv6-first.
+2. Compose publishes the port as `127.0.0.1:5433:5432`, so `[::1]:5433` has no
+   listener.
+3. libpq tries resolved addresses **in order**, and `connect_timeout` is applied
+   **per address**. The `::1` attempt is not rejected promptly here (~2s raw), so
+   every new connection pays that cost before falling back to IPv4 — and with
+   `connect_timeout=5` it burns the full 5s rather than the 2s, proving the wait
+   is bounded by the timeout, not by the refusal.
+
+**Still not explained.** A per-connection penalty of a few seconds does not by
+itself account for a test that runs past 240s over two connections. The remaining
+multiplier has not been isolated. What is established is the direction — the name
+`localhost` costs seconds per connection and the literal IPv4 address costs
+nothing — and that is enough to justify the decision.
 
 **Decision.** Default `POSTGRES_HOST` to `127.0.0.1` in both `src/config.py` and
-`.env.example`.
+`.env.example`. Keep the explicit IPv4 binding in compose: binding to all
+interfaces would hide this and would also expose the database beyond the host.
 
-**Consequence.** The same test went from hanging to passing in 0.44s. Keep the
-explicit IPv4 binding in compose: binding to all interfaces would hide this but
-would also expose the database beyond the host.
+**Consequence and the general lesson.** The connection string carries no
+`connect_timeout`, so a connection that cannot be made waits instead of failing.
+**A missing timeout converts a fast error into an unbounded wait** — the same
+property that makes timeouts a design concern for every outbound call in this
+system, not a tuning detail.

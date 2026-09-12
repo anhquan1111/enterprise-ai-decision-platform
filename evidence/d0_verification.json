@@ -78,10 +78,23 @@
     "Not deployed anywhere; local Docker Compose only"
   ],
   "bug_found_and_fixed": {
-    "symptom": "Integration test hung instead of failing",
-    "cause": "localhost resolves to ::1 first on this host; compose binds 127.0.0.1 only (IPv4), so the IPv6 attempt stalled",
-    "evidence": "Test-NetConnection ::1 -Port 5433 -> False; 127.0.0.1 -> True",
+    "symptom": "Integration test did not finish instead of failing fast",
+    "first_explanation": "WRONG: blamed an IPv6 connect that stalls, citing an unreliable Test-NetConnection probe",
+    "measured_cause": {
+      "getaddrinfo_localhost_order": [
+        "::1 (AF_INET6) first",
+        "127.0.0.1 (AF_INET) second"
+      ],
+      "listeners_on_5433": "127.0.0.1 only; nothing on [::1] because compose binds IPv4",
+      "raw_connect_v6": "ConnectionRefusedError after 2.04s (refused, not prompt)",
+      "raw_connect_v4": "connected in 0.000s",
+      "psycopg_localhost_with_timeout_5": "succeeded in 5.08s - exactly the per-address connect_timeout",
+      "psycopg_127_0_0_1": "succeeded in 0.04s",
+      "mechanism": "libpq tries resolved addresses in order and applies connect_timeout per address; the dead IPv6 address is paid for on every new connection"
+    },
+    "still_unexplained": "A few seconds per connection over two connections does not account for >240s; the remaining multiplier was not isolated",
     "fix": "POSTGRES_HOST defaults to 127.0.0.1 in src/config.py and .env.example",
-    "recorded_as": "docs/decisions.md ADR-005"
+    "general_lesson": "The DSN has no connect_timeout, so a failed connection waits instead of erroring - a missing timeout turns a fast error into an unbounded wait",
+    "recorded_as": "docs/decisions.md ADR-005 (corrected)"
   }
 }
