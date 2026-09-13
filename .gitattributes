@@ -1,0 +1,8 @@
+# Chuẩn hoá line ending. Không có file này thì mỗi công cụ ghi một kiểu (PowerShell
+# ghi CRLF, Python ghi LF) và diff đầy nhiễu: một file đổi 24 dòng thật hiện ra thành
+# 424 dòng, che mất thay đổi thực sự.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.pdf binary

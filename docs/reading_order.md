@@ -36,7 +36,8 @@ phải một câu dặn trong prompt. Đó là lý do của gần như mọi quy
 | # | File | Câu hỏi được trả lời | Tương ứng tài liệu |
 |---:|---|---|---|
 | 3 | [src/config.py](../src/config.py) | Setting đến từ đâu, `database_url` được ghép thế nào | — |
-| 4 | [src/db.py](../src/db.py) | Mở connection kiểu gì, vì sao đường đọc là read-only | Ngày 6 |
+| 4 | [src/scope.py](../src/scope.py) | Role nào đọc được mức quyền nào | — |
+| 5 | [src/db.py](../src/db.py) | Mở connection kiểu gì, vì sao đường đọc là read-only | Ngày 6 |
 
 Hai chỗ đáng dừng lại:
 
@@ -44,13 +45,16 @@ Hai chỗ đáng dừng lại:
   ADR-005 ở chặng 6 nếu muốn biết số đo.
 - `get_connection(read_only=True)` là mặc định: đường trả lời câu hỏi không bao giờ cần
   ghi dữ liệu nghiệp vụ.
+- `src/scope.py` nhỏ nhưng là **nguồn sự thật duy nhất** về phân quyền, và nó cố ý
+  **không phụ thuộc pandas**: đường serving không nên kéo theo numpy chỉ để tra một
+  dict. Nó tách ra khỏi `contracts.py` sau D1 — xem phần cuối file.
 
 ## Chặng 3 — Biên của hệ thống (10 phút)
 
 | # | File | Câu hỏi được trả lời |
 |---:|---|---|
-| 5 | [src/schemas.py](../src/schemas.py) | Request/response của `/ask` có hình dạng gì |
-| 6 | [src/api.py](../src/api.py) | Ba endpoint làm gì, vì sao `/ask` trả 501 |
+| 6 | [src/schemas.py](../src/schemas.py) | Request/response của `/ask` có hình dạng gì |
+| 7 | [src/api.py](../src/api.py) | Ba endpoint làm gì, vì sao `/ask` trả 501 |
 
 Điểm cần nắm: **schema hợp lệ** và **nội dung đúng** là hai việc khác nhau. Pydantic
 kiểm cái thứ nhất; cái thứ hai là việc của bộ đánh giá ở D2.
@@ -68,13 +72,13 @@ uv run uvicorn src.api:app --port 8010
 
 | # | File | Câu hỏi được trả lời | Tương ứng tài liệu |
 |---:|---|---|---|
-| 7 | [sql/01_schema.sql](../sql/01_schema.sql) | 7 bảng, và mỗi constraint chặn lỗi gì | Ngày 6 + Ngày 7 |
-| 8 | [sql/02_seed.sql](../sql/02_seed.sql) | Dữ liệu nghiệp vụ, hai điểm được gài có chủ ý | Ngày 7 |
-| 9 | [data/documents.csv](../data/documents.csv) và [documents_dirty.csv](../data/documents_dirty.csv) | Dữ liệu thật trông như thế nào; 8 dòng bẩn sai những gì | Ngày 7 lab |
-| 10 | [src/contracts.py](../src/contracts.py) | Sáu quy tắc R1–R6, và vì sao mỗi cái là FATAL hay WARNING | Ngày 7 file 1 + 2 |
-| 11 | [scripts/ingest.py](../scripts/ingest.py) | Luồng đọc → kiểm → quarantine → upsert → manifest | Ngày 7 file 3 |
+| 8 | [sql/01_schema.sql](../sql/01_schema.sql) | 7 bảng, và mỗi constraint chặn lỗi gì | Ngày 6 + Ngày 7 |
+| 9 | [sql/02_seed.sql](../sql/02_seed.sql) | Dữ liệu nghiệp vụ, hai điểm được gài có chủ ý | Ngày 7 |
+| 10 | [data/documents.csv](../data/documents.csv) và [documents_dirty.csv](../data/documents_dirty.csv) | Dữ liệu thật trông như thế nào; 8 dòng bẩn sai những gì | Ngày 7 lab |
+| 11 | [src/contracts.py](../src/contracts.py) | Sáu quy tắc R1–R6, và vì sao mỗi cái là FATAL hay WARNING | Ngày 7 file 1 + 2 |
+| 12 | [scripts/ingest.py](../scripts/ingest.py) | Luồng đọc → kiểm → quarantine → upsert → manifest | Ngày 7 file 3 |
 
-File 7 đọc theo từng khối có tiêu đề khung, không đọc tuần tự từng dòng. Ba chỗ quan
+`01_schema.sql` đọc theo từng khối có tiêu đề khung, không đọc tuần tự từng dòng. Ba chỗ quan
 trọng nhất:
 
 - `PRIMARY KEY (doc_id, chunk_index)` — grain được database bảo đảm.
@@ -82,14 +86,14 @@ trọng nhất:
 - Các `CHECK` lặp lại đúng quy tắc đã có trong `contracts.py` — **lặp có chủ ý**, là
   lớp chặn thứ hai cho những đường ghi không đi qua Python.
 
-File 9: trước khi đọc tiếp, thử tự tìm 8 dòng bẩn sai gì. Rồi chạy:
+`documents_dirty.csv`: trước khi đọc tiếp, thử tự tìm 8 dòng bẩn sai gì. Rồi chạy:
 
 ```powershell
 uv run python -m scripts.ingest data/documents_dirty.csv
 docker compose exec -T db psql -U app -d enterprise_ai -c "SELECT doc_id, chunk_index, left(reject_reason,60) FROM doc_chunks_quarantine ORDER BY quarantine_id;"
 ```
 
-File 11, hai chỗ khó nhất trong toàn bộ D1:
+`scripts/ingest.py`, hai chỗ khó nhất trong toàn bộ D1:
 
 - `ON CONFLICT ... DO UPDATE ... RETURNING (xmax = 0)` — `xmax = 0` nghĩa là dòng vừa
   được chèn mới, nhờ đó manifest phân biệt được insert với update. Chạy `ingest` hai
@@ -101,14 +105,14 @@ File 11, hai chỗ khó nhất trong toàn bộ D1:
 
 | # | File | Câu hỏi được trả lời | Tương ứng tài liệu |
 |---:|---|---|---|
-| 12 | [sql/03_business_metrics.sql](../sql/03_business_metrics.sql) | JOIN many-to-one và window function tính tăng trưởng | Ngày 6 file 1 + 2 |
-| 13 | [sql/04_docs_point_in_time.sql](../sql/04_docs_point_in_time.sql) | Ba điều kiện độc lập: quyền, đã có trong hệ thống, còn hiệu lực | Ngày 6 file 3 |
-| 14 | [sql/05_explain.sql](../sql/05_explain.sql) rồi [docs/query_plan.md](query_plan.md) | Index giúp được bao nhiêu, ở quy mô nào | Ngày 6 file 4 |
+| 13 | [sql/03_business_metrics.sql](../sql/03_business_metrics.sql) | JOIN many-to-one và window function tính tăng trưởng | Ngày 6 file 1 + 2 |
+| 14 | [sql/04_docs_point_in_time.sql](../sql/04_docs_point_in_time.sql) | Ba điều kiện độc lập: quyền, đã có trong hệ thống, còn hiệu lực | Ngày 6 file 3 |
+| 15 | [sql/05_explain.sql](../sql/05_explain.sql) rồi [docs/query_plan.md](query_plan.md) | Index giúp được bao nhiêu, ở quy mô nào | Ngày 6 file 4 |
 
-File 13 là chỗ ngày 6 gặp lại trực tiếp nhất. Câu hỏi tự kiểm: vì sao lọc thiếu
+`03_business_metrics.sql` là chỗ ngày 6 gặp lại trực tiếp nhất. Câu hỏi tự kiểm: vì sao lọc thiếu
 `available_at <= as_of` là một dạng leakage, dù query vẫn chạy đúng cú pháp?
 
-File 14 chạy được và tự dọn sau khi chạy (`ROLLBACK`):
+`05_explain.sql` chạy được và tự dọn sau khi chạy (`ROLLBACK`):
 
 ```powershell
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/05_explain.sql
@@ -121,8 +125,9 @@ Trong `query_plan.md`, đọc kỹ mục "Bốn điều rút ra" — có một k
 
 | # | File | Câu hỏi được trả lời |
 |---:|---|---|
-| 15 | [tests/test_contracts.py](../tests/test_contracts.py) | Mỗi quy tắc bị vi phạm thì hệ thống làm gì |
-| 16 | [tests/test_sql_integration.py](../tests/test_sql_integration.py) | Grain có giữ được không, phân quyền có hiệu lực không |
+| 16 | [tests/test_contracts.py](../tests/test_contracts.py) | Mỗi quy tắc bị vi phạm thì hệ thống làm gì |
+| 17 | [tests/test_sql_integration.py](../tests/test_sql_integration.py) | Grain có giữ được không, phân quyền có hiệu lực không |
+| 18 | [tests/conftest.py](../tests/conftest.py) | Vì sao test phải cách ly khỏi `.env` của máy |
 
 Nếu chỉ có 15 phút cho cả D1, đọc hai file này. Tên test là một câu phát biểu về hành
 vi, nên đọc danh sách tên test là đọc được bản tóm tắt của cả tầng dữ liệu:
@@ -135,8 +140,8 @@ uv run pytest tests/ --collect-only -q
 
 | # | File | Câu hỏi được trả lời |
 |---:|---|---|
-| 17 | [docs/decisions.md](decisions.md) | 8 quyết định không hiển nhiên, kèm số đo |
-| 18 | [AGENTS.md](../AGENTS.md) mục 4, 6, 7 | Quyền của AI, các bẫy đã gặp, kế hoạch D2–D5 |
+| 19 | [docs/decisions.md](decisions.md) | 8 quyết định không hiển nhiên, kèm số đo |
+| 20 | [AGENTS.md](../AGENTS.md) mục 4, 6, 7 | Quyền của AI, các bẫy đã gặp, kế hoạch D2–D5 |
 
 ADR nên đọc trước nếu ít thời gian: **005** (một bug thật và một lần tôi giải thích
 sai rồi sửa), **006** (contract là module dùng chung), **007** (TRUNCATE CASCADE xóa
