@@ -10,7 +10,8 @@ audit**.
 > contract-validated document ingestion pipeline are in place and tested. The
 > answer path is not implemented yet: `/ask` returns `501` on purpose rather than
 > returning a plausible-looking placeholder. Build order and progress are tracked
-> in [`AGENTS.md`](AGENTS.md#7-session-plan-d0--d5).
+> in [`AGENTS.md`](AGENTS.md#7-session-plan-d0--d5). A guided reading order
+> for the code is in [`docs/reading_order.md`](docs/reading_order.md).
 
 ## Why this project
 
