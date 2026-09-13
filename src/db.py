@@ -1,9 +1,8 @@
-"""PostgreSQL access helpers.
+"""Truy cập PostgreSQL bằng raw SQL, không dùng ORM.
 
-Raw SQL with psycopg, no ORM: the SQL tool in this project must run queries the
-author can read, explain and check a query plan for. Parameters are always passed
-to psycopg rather than formatted into the string, so a question can never inject
-SQL.
+Lý do không ORM: tool SQL của hệ thống phải chạy những câu mà tác giả đọc được,
+giải thích được và đọc được query plan. Mọi giá trị đi qua tham số của psycopg,
+không nối vào chuỗi SQL.
 """
 
 from collections.abc import Iterator
@@ -18,15 +17,15 @@ from src.config import get_settings
 
 @contextmanager
 def get_connection(*, read_only: bool = True) -> Iterator[psycopg.Connection[dict[str, Any]]]:
-    """Open a connection as a context manager.
+    """Mở connection dạng context manager.
 
     Args:
-        read_only: Open the session read-only. The question-answering path never
-            needs to write business data, so it runs read-only and a bug cannot
-            modify or delete rows. Ingestion and audit writes pass False.
+        read_only: Mở session chỉ đọc. Đường trả lời câu hỏi không bao giờ cần ghi
+            dữ liệu nghiệp vụ, nên để read-only: một bug hoặc một câu SQL do LLM
+            sinh ra cũng không sửa được dữ liệu. Ingestion và audit truyền False.
 
     Yields:
-        An open psycopg connection with dict-style rows.
+        Connection đang mở, row trả về dạng dict.
     """
     settings = get_settings()
     with psycopg.connect(settings.database_url, row_factory=dict_row) as conn:
@@ -36,25 +35,40 @@ def get_connection(*, read_only: bool = True) -> Iterator[psycopg.Connection[dic
 
 
 def fetch_all(sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    """Run a read-only SELECT and return all rows.
+    """Chạy một SELECT chỉ đọc và trả về toàn bộ dòng.
 
     Args:
-        sql: Statement with named placeholders, e.g. ``%(department_id)s``.
-        params: Values for those placeholders.
-
-    Returns:
-        Rows as dictionaries.
+        sql: Câu lệnh dùng named placeholder, ví dụ ``%(department)s``.
+        params: Giá trị cho các placeholder đó.
     """
     with get_connection(read_only=True) as conn, conn.cursor() as cur:
         cur.execute(sql, params or {})
         return cur.fetchall()
 
 
-def check_connection() -> str:
-    """Return the server version, or raise if the database is unreachable.
+def fetch_one(sql: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Như fetch_all nhưng trả về dòng đầu tiên, hoặc None nếu không có dòng nào."""
+    with get_connection(read_only=True) as conn, conn.cursor() as cur:
+        cur.execute(sql, params or {})
+        return cur.fetchone()
 
-    Used by the readiness probe. Kept separate from the liveness probe so that a
-    database outage marks the service not-ready instead of killing the container.
+
+def explain(sql: str, params: dict[str, Any] | None = None) -> str:
+    """Trả về query plan thật (EXPLAIN ANALYZE) của một câu SELECT.
+
+    ANALYZE nghĩa là câu lệnh được **chạy thật** để lấy số dòng và thời gian thực,
+    không phải số ước lượng. Chỉ dùng cho SELECT.
+    """
+    with get_connection(read_only=True) as conn, conn.cursor() as cur:
+        cur.execute(f"EXPLAIN (ANALYZE, BUFFERS) {sql}", params or {})
+        return "\n".join(str(row["QUERY PLAN"]) for row in cur.fetchall())
+
+
+def check_connection() -> str:
+    """Trả về version của server, hoặc raise nếu database không tới được.
+
+    Dùng cho readiness probe. Tách khỏi liveness probe để khi database chết thì
+    service bị đánh dấu not-ready, chứ không bị restart container.
     """
     with get_connection(read_only=True) as conn, conn.cursor() as cur:
         cur.execute("SELECT version() AS version")

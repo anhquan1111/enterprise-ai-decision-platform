@@ -1,0 +1,9 @@
+doc_id,chunk_index,department,access_level,title,chunk_text,published_at,available_at,effective_from,effective_to
+HR-001,0,hr,employee,Quy dinh nghi phep,Dong hop le de doi chieu.,2026-01-10 09:00:00+00,2026-01-10 10:00:00+00,2026-01-01,
+HR-001,0,hr,employee,Quy dinh nghi phep,Ban sao trung khoa tu nhieu lan ingest.,2026-01-10 09:00:00+00,2026-01-10 10:00:00+00,2026-01-01,
+FIN-022,0,,manager,Quy trinh tam ung,Thieu department nen khong biet ai duoc doc.,2026-04-01 09:00:00+00,2026-04-01 09:30:00+00,2026-04-01,
+ENG-009,0,engineering,top_secret,Khoa bi mat,Access level ngoai tap cho phep.,2026-04-05 09:00:00+00,2026-04-05 09:30:00+00,2026-04-05,
+SAL-005,0,sales,employee,Chinh sach cu,Khoang hieu luc nguoc chieu.,2026-02-10 09:00:00+00,2026-02-10 09:30:00+00,2026-08-01,2026-03-01
+ENG-011,0,engineering,employee,Ghi chu noi bo,available_at truoc published_at nen khong the dung.,2026-05-02 10:00:00+00,2026-05-02 08:00:00+00,2026-05-02,
+SAL-008,0,sales,employee,Ban tin ngan,,2026-06-01 09:00:00+00,2026-06-01 09:30:00+00,2026-06-01,
+LEG-001,0,legal,employee,Dieu khoan hop dong,Department khong nam trong tap cho phep.,2026-03-01 09:00:00+00,2026-03-01 09:30:00+00,2026-03-01,

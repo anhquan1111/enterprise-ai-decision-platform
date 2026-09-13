@@ -1,11 +1,10 @@
-"""Request and response contracts for the /ask endpoint.
+"""Contract request/response của endpoint /ask.
 
-These models are the boundary of the system. Two things are deliberately kept
-separate here:
+Đây là biên của hệ thống. Hai thứ được tách riêng có chủ ý:
 
-* **Schema validity** — enforced by Pydantic (shape, types, allowed values).
-* **Answer correctness** — NOT enforced here. A response can satisfy this schema
-  and still be wrong; that is what the evaluation harness (D2) measures.
+* **Schema hợp lệ** — Pydantic kiểm (hình dạng, kiểu, tập giá trị cho phép).
+* **Nội dung đúng** — KHÔNG kiểm ở đây. Một response có thể đúng schema mà vẫn trả
+  lời sai; đó là việc của bộ đánh giá ở D2.
 """
 
 from enum import StrEnum
@@ -14,7 +13,7 @@ from pydantic import BaseModel, Field
 
 
 class Role(StrEnum):
-    """Access role of the caller. Determines which rows and documents are visible."""
+    """Vai trò của người gọi. Quyết định dòng dữ liệu và tài liệu nào được thấy."""
 
     EMPLOYEE = "employee"
     MANAGER = "manager"
@@ -22,7 +21,7 @@ class Role(StrEnum):
 
 
 class Department(StrEnum):
-    """Organisational unit of the caller."""
+    """Phòng ban của người gọi."""
 
     SALES = "sales"
     HR = "hr"
@@ -31,7 +30,7 @@ class Department(StrEnum):
 
 
 class ToolUsed(StrEnum):
-    """Which tool produced the evidence for the answer."""
+    """Nguồn bằng chứng của câu trả lời."""
 
     SQL = "sql"
     DOCS = "docs"
@@ -40,10 +39,10 @@ class ToolUsed(StrEnum):
 
 
 class AskRequest(BaseModel):
-    """An incoming question together with the caller's identity.
+    """Câu hỏi kèm danh tính người gọi.
 
-    The caller's role and department are part of the request rather than inferred
-    later, because every data access downstream is scoped by them.
+    Role và department nằm trong request chứ không suy ra về sau, vì mọi truy cập
+    dữ liệu phía dưới đều bị giới hạn theo hai trường này.
     """
 
     user_id: str = Field(min_length=1, max_length=64, examples=["emp_042"])
@@ -53,36 +52,36 @@ class AskRequest(BaseModel):
 
 
 class Citation(BaseModel):
-    """One piece of evidence backing a claim in the answer.
+    """Một bằng chứng cho một khẳng định trong câu trả lời.
 
-    A citation points at something retrievable: either a document chunk or the
-    SQL statement that produced a number. Without this, an answer cannot be
-    verified, and an unverifiable answer is treated as a failure.
+    Citation phải trỏ tới thứ truy lại được: một chunk tài liệu, hoặc chính câu SQL
+    đã tạo ra con số. Không có nó thì câu trả lời không kiểm chứng được, và câu trả
+    lời không kiểm chứng được bị coi là thất bại.
     """
 
     source_type: ToolUsed
-    # Document citations fill doc_id/chunk_id/quote; SQL citations fill sql.
+    # Citation tài liệu điền doc_id/chunk_index/quote; citation số liệu điền sql.
     doc_id: str | None = None
-    chunk_id: int | None = None
+    chunk_index: int | None = None
     quote: str | None = None
     sql: str | None = None
 
 
 class AskResponse(BaseModel):
-    """The structured answer returned to the caller."""
+    """Câu trả lời có cấu trúc trả về cho người gọi."""
 
     request_id: str
     answer: str
     citations: list[Citation]
     tool_used: ToolUsed
-    # True when the system refused to answer because the evidence it is allowed
-    # to see does not support one. Refusing is a correct outcome, not an error.
+    # True khi hệ thống từ chối trả lời vì bằng chứng trong phạm vi quyền không đủ.
+    # Từ chối là kết quả đúng, không phải lỗi.
     abstained: bool
     latency_ms: int
 
 
 class HealthResponse(BaseModel):
-    """Liveness payload: the process is up. Says nothing about dependencies."""
+    """Liveness: process còn sống. Không nói gì về dependency."""
 
     status: str
     app: str
@@ -91,7 +90,7 @@ class HealthResponse(BaseModel):
 
 
 class ReadyResponse(BaseModel):
-    """Readiness payload: the process can actually serve traffic."""
+    """Readiness: process thật sự phục vụ được request."""
 
     ready: bool
     checks: dict[str, str]

@@ -60,8 +60,17 @@ docker compose up -d                # Bật cả API trong container (demo)
 docker compose down                 # Dừng, giữ dữ liệu trong named volume
 docker compose down -v              # Dừng và XÓA dữ liệu
 
-# Áp schema (thêm MSYS_NO_PATHCONV=1 nếu dùng Git Bash — xem mục 6)
+# Áp schema và seed (thêm MSYS_NO_PATHCONV=1 nếu dùng Git Bash — xem mục 6)
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/00_extensions.sql
+docker compose exec -T db psql -U app -d enterprise_ai -f /sql/01_schema.sql
+docker compose exec -T db psql -U app -d enterprise_ai -f /sql/02_seed.sql
+
+# Ingest tài liệu. Dùng -m để project root vào sys.path, không phải python scripts/...
+uv run python -m scripts.ingest                            # corpus chính, 16 chunk
+uv run python -m scripts.ingest data/documents_dirty.csv   # xem quarantine hoạt động
+
+# Query plan: thí nghiệm 16 dòng vs 20k dòng, có/không index, kết thúc bằng ROLLBACK
+docker compose exec -T db psql -U app -d enterprise_ai -f /sql/05_explain.sql
 
 # API dev server
 uv run uvicorn src.api:app --reload --port 8010
@@ -72,7 +81,7 @@ uv run pytest tests/ -v -m "not integration"    # Mặc định, không cần DB
 uv run pytest tests/ -v -m integration          # Cần docker compose up -d db
 uv run ruff check src/ tests/ scripts/
 uv run ruff format src/ tests/ scripts/
-uv run mypy src/
+uv run mypy src/ scripts/
 ```
 
 **Port đã dùng:** API `8010`, PostgreSQL `5433`. Tránh `8000` (fraud-detection-api) và `5546` (lab SQL ngày 6) vì hai cái đó có thể đang chạy song song.
@@ -157,6 +166,17 @@ Sau khi thêm timeout, chạy lại với `POSTGRES_HOST=localhost` mất **10,9
 
 Một stub trả lời trông như thật sẽ làm endpoint trông như đã xong, và đó đúng là hành vi project này được xây để phản đối. Test `test_ask_is_honestly_unimplemented` sẽ phải được viết lại khi D2 implement thật — để việc đổi hành vi là hành động có ý thức.
 
+### TRUNCATE ... CASCADE xóa nhiều hơn bảng được nêu tên
+
+`doc_chunks` có khóa ngoại tới `departments`, nên `TRUNCATE departments CASCADE` xóa luôn
+toàn bộ corpus tài liệu. Bản đầu của `sql/02_seed.sql` mắc đúng lỗi này. Seed giờ dùng
+`ON CONFLICT DO UPDATE`, chạy lại bao nhiêu lần cũng an toàn. Xem ADR-007.
+
+### Chạy script bằng `-m`, không phải đường dẫn file
+
+`python scripts/ingest.py` không import được `src` vì project root không nằm trong
+sys.path. `python -m scripts.ingest` thì có. Đừng chèn sys.path trong code để lách.
+
 ### Eval trước tối ưu
 
 D2 phải có bộ eval và số baseline **trước** khi D3 đổi retrieval. Đây là nguyên tắc cứng, không phải thứ tự cho tiện.
@@ -172,7 +192,7 @@ Lịch học tương ứng nằm ở `CHIEN_LUOC_HOC_VA_LAM_PROJECT_RIKKEI.md` t
 | Session | Trạng thái | Roadmap | Deliverables |
 |---|---|---|---|
 | **D0** | DONE | Ngày 5 (pandas) | Skeleton: `compose.yaml`, `Dockerfile`, `src/{api,config,db,schemas}.py`, 7 tests, CI, `docs/{architecture,decisions}.md` |
-| **D1** | TODO | Ngày 6 + 7 | `sql/01_schema.sql`, `sql/02_seed.sql`, `scripts/ingest.py` có contract validation, `docs/query_plan.md` (EXPLAIN trước/sau index) |
+| **D1** | DONE | Ngày 6 + 7 | `sql/01_schema.sql` (7 bảng), `sql/02_seed.sql`, `sql/03_business_metrics.sql`, `sql/04_docs_point_in_time.sql`, `sql/05_explain.sql`, `src/contracts.py`, `scripts/ingest.py`, `data/documents.csv` (16 chunk) + `documents_dirty.csv`, 32 tests, `docs/query_plan.md` |
 | **D2** | TODO | Ngày 19 + 20 | `src/retrieval/dense.py`, `src/generation.py` (structured output), `eval/questions.jsonl` (40 câu: 28 dev / 12 held-out), `scripts/run_eval.py`, `evidence/eval_baseline.json` |
 | **D3** | TODO | Ngày 21 + 22 | `src/retrieval/{lexical,fusion}.py`, `evidence/eval_hybrid.json` + bảng so sánh, `src/agent/` (2 tool, timeout, retry, max_steps), test prompt injection |
 | **D4** | TODO | Ngày 25 + 26 | `src/security/scope.py`, `tests/test_rbac_isolation.py`, `src/audit.py`, Prometheus metrics, `docs/runbook.md` |

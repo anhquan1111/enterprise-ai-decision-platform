@@ -6,11 +6,11 @@ or in **internal policy documents (retrieval)**, and answers **with citations**,
 **only within the asker's access scope**, while **logging every request for
 audit**.
 
-> **Status: D0 — skeleton.** The service boots, reports liveness and readiness,
-> and enforces the `/ask` request contract. The answer path is not implemented
-> yet: `/ask` returns `501` on purpose rather than returning a plausible-looking
-> placeholder. Build order and progress are tracked in
-> [`AGENTS.md`](AGENTS.md#7-session-plan-d0--d5).
+> **Status: D1 — data layer.** PostgreSQL schema, synthetic business data and a
+> contract-validated document ingestion pipeline are in place and tested. The
+> answer path is not implemented yet: `/ask` returns `501` on purpose rather than
+> returning a plausible-looking placeholder. Build order and progress are tracked
+> in [`AGENTS.md`](AGENTS.md#7-session-plan-d0--d5).
 
 ## Why this project
 
@@ -58,10 +58,22 @@ cp .env.example .env
 
 uv sync --extra dev
 docker compose up -d db
+
+# Schema, business data, then the document corpus
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/00_extensions.sql
+docker compose exec -T db psql -U app -d enterprise_ai -f /sql/01_schema.sql
+docker compose exec -T db psql -U app -d enterprise_ai -f /sql/02_seed.sql
+uv run python -m scripts.ingest
 
 uv run uvicorn src.api:app --reload --port 8010
 # http://127.0.0.1:8010/docs
+```
+
+See how the contract rejects bad data, without touching the clean corpus:
+
+```bash
+uv run python -m scripts.ingest data/documents_dirty.csv
+# 8 rows in, 0 accepted, 8 quarantined — each with a readable reject_reason
 ```
 
 Verify:
@@ -86,15 +98,29 @@ them.
 src/
 ├── api.py          # FastAPI app: /health, /ready, /ask
 ├── config.py       # Settings from env/.env
+├── contracts.py    # Data contract: rules, severity, role visibility
 ├── db.py           # psycopg helpers, read-only sessions on the query path
 └── schemas.py      # Request/response contracts
 
-sql/                # Schema and seed, applied with psql
+scripts/ingest.py   # read -> validate -> quarantine -> upsert -> manifest
+sql/                # 00 extensions, 01 schema, 02 seed, 03-05 queries and EXPLAIN
+data/               # Synthetic corpus (16 chunks) + a deliberately dirty batch
 eval/               # Evaluation questions with ground truth (committed on purpose)
 evidence/           # Raw outputs behind every number quoted here
-docs/               # architecture.md, decisions.md, report.md
+docs/               # architecture.md, decisions.md, query_plan.md, report.md
 tests/              # Contract tests; integration tests marked and opt-in
 ```
+
+### What the data layer enforces
+
+| Layer | Catches |
+|---|---|
+| `src/contracts.py` | Duplicate keys, missing required fields, values outside the allowed set, reversed validity intervals, `available_at` before `published_at`. Rejected rows go to `doc_chunks_quarantine` with a readable reason. |
+| PostgreSQL constraints | The same rules again, so a migration script or a manual fix during an incident cannot bypass them. |
+| `ingest_run` table | One manifest row per run: counts per rule, and a `CHECK` that accepted + quarantined equals rows in file. |
+
+Query plans for the retrieval path, measured at 16 and ~20k rows, are in
+[`docs/query_plan.md`](docs/query_plan.md).
 
 ## Evaluation
 

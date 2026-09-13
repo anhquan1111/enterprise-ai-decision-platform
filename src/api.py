@@ -1,10 +1,9 @@
 """FastAPI application.
 
-D0 scope: the service boots, reports liveness and readiness, and exposes the
-/ask contract. /ask deliberately returns 501 until the retrieval and agent
-layers land (D2-D3) — a stub that returned a plausible-looking answer would make
-the endpoint look finished and would be the exact behaviour this project is
-built to argue against.
+Phạm vi hiện tại: service khởi động được, báo liveness/readiness, và áp contract cho
+/ask. /ask vẫn trả 501 cho tới khi tầng retrieval và agent xong (D2-D3) — một stub
+trả về câu trả lời trông như thật sẽ làm endpoint trông như đã hoàn thiện, và đó
+đúng là hành vi project này được xây để phản đối.
 """
 
 import logging
@@ -34,7 +33,7 @@ app = FastAPI(
 
 @app.get("/health", response_model=HealthResponse, tags=["ops"])
 def health() -> HealthResponse:
-    """Liveness: the process is running. Makes no dependency calls on purpose."""
+    """Liveness: process đang chạy. Cố ý không gọi dependency nào."""
     return HealthResponse(
         status="ok",
         app=settings.app_name,
@@ -45,13 +44,13 @@ def health() -> HealthResponse:
 
 @app.get("/ready", response_model=ReadyResponse, tags=["ops"])
 def ready() -> JSONResponse:
-    """Readiness: dependencies needed to serve a request are reachable."""
+    """Readiness: dependency cần để phục vụ request có tới được hay không."""
     checks: dict[str, str] = {}
     try:
         version = check_connection()
         checks["postgres"] = f"ok ({version.split(',')[0]})"
         is_ready = True
-    except Exception as exc:  # noqa: BLE001 - surfaced to the caller, not swallowed
+    except Exception as exc:  # noqa: BLE001 - báo ra cho caller, không nuốt lỗi
         checks["postgres"] = f"unreachable: {type(exc).__name__}"
         is_ready = False
 
@@ -62,10 +61,10 @@ def ready() -> JSONResponse:
 
 @app.post("/ask", tags=["qa"], status_code=status.HTTP_501_NOT_IMPLEMENTED)
 def ask(request: AskRequest) -> JSONResponse:
-    """Answer a question within the caller's access scope.
+    """Trả lời câu hỏi trong phạm vi quyền của người gọi.
 
-    Not implemented yet. The request contract is already enforced, so an invalid
-    role or an empty question is rejected with 422 today.
+    Chưa implement. Contract của request thì đã áp: role lạ hoặc câu hỏi rỗng bị
+    chặn với 422 ngay từ hôm nay.
     """
     request_id = str(uuid.uuid4())
     started = time.perf_counter()

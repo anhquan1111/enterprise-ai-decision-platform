@@ -5,6 +5,9 @@ reasoning survives past the day it was made. Format: context → decision →
 consequence. A decision that later turns out wrong is superseded here, not
 silently edited.
 
+Ghi chú về ngôn ngữ: ADR-001..005 (D0) viết bằng tiếng Anh, từ ADR-006 (D1) trở đi viết
+bằng tiếng Việt để tác giả đọc lại nhanh hơn. Nội dung và format không đổi.
+
 ---
 
 ## ADR-001 — One PostgreSQL instance for business data, vectors and audit log
@@ -163,3 +166,86 @@ as a failure. Neither is a tuning detail: together they decide whether a fault
 shows up as a clear error in seconds or as a frozen terminal. Every outbound call
 added to this system later — LLM API, embedding service, reranker — gets a timeout
 at the point it is written, not after it hangs once.
+
+---
+
+## ADR-006 — Contract dữ liệu là một module dùng chung, severity phân theo hậu quả
+
+**Ngày:** D1 · **Trạng thái:** accepted
+
+**Bối cảnh.** Dữ liệu tài liệu vào hệ thống qua ingestion, và sẽ được đọc lại ở đường
+serving. Cách dễ nhất là kiểm ở mỗi nơi tiêu thụ.
+
+**Quyết định.** Toàn bộ quy tắc nằm trong `src/contracts.py`, áp **một lần ở biên
+ingestion**. Hai mức severity, phân theo **hậu quả nếu dòng đó vào bảng chính**:
+`FATAL` đưa dòng vào quarantine, `WARNING` cho dòng vào nhưng đếm và báo.
+
+**Vì sao.** Kiểm rải rác thì mỗi nơi kiểm một tập quy tắc hơi khác, và chỗ nào quên
+thì chỗ đó sai. Với `access_level` điều này nghiêm trọng hơn: nó là ranh giới bảo mật,
+nên một giá trị lạ phải bị từ chối chứ không được hạ xuống mức thấp nhất cho tiện —
+một mức lạ rất có thể là mức cao hơn `executive`, và hạ nó xuống là công khai tài liệu
+mật. Fail-closed.
+
+Hai bản sao của cùng một contract cũng là cách sinh ra sai lệch train/serve: offline
+chuẩn hóa một kiểu, online một kiểu, không bên nào báo lỗi.
+
+**Hệ quả.** `doc_chunks_quarantine` giữ dòng thô kèm `reject_reason`, và `ingest_run`
+lưu manifest mỗi lần chạy. Manifest nằm trong bảng chứ không phải file JSON để so được
+giữa các lần chạy bằng SQL: tỷ lệ loại nhảy từ 5% lên 40% là tín hiệu, dù từng lý do
+đều hợp lệ. `ck_rows_balance` ép `nhận + loại = số dòng trong file` ngay ở database.
+
+---
+
+## ADR-007 — Seed idempotent, không dùng TRUNCATE CASCADE
+
+**Ngày:** D1 · **Trạng thái:** accepted, phát hiện khi chạy thật
+
+**Bối cảnh.** Bản đầu của `sql/02_seed.sql` mở bằng
+`TRUNCATE monthly_revenue, employees, departments CASCADE;` cho "sạch".
+
+**Điều đã xảy ra.** `doc_chunks` có khóa ngoại tới `departments`, nên CASCADE lan sang
+và **xóa toàn bộ corpus tài liệu đã ingest**. psql báo đúng điều đó:
+`NOTICE: truncate cascades to table "doc_chunks"`.
+
+**Quyết định.** Bỏ TRUNCATE. Cả ba bảng dùng `INSERT ... ON CONFLICT DO UPDATE`.
+
+**Hệ quả.** Chạy lại seed bao nhiêu lần cũng an toàn và không ảnh hưởng dữ liệu tài
+liệu. Cùng một tính chất idempotent mà ingestion đã có qua `ON CONFLICT DO UPDATE` trên
+khóa tự nhiên — xem ADR-006.
+
+**Bài học tổng quát.** Một lệnh dọn dẹp có CASCADE phải được đọc cùng với sơ đồ khóa
+ngoại, không đọc một mình. "Cho sạch" là lý do yếu để xóa dữ liệu.
+
+---
+
+## ADR-008 — Giữ index ix_chunks_scope dù ở quy mô hiện tại chưa đo được lợi ích
+
+**Ngày:** D1 · **Trạng thái:** accepted, có số đo
+
+**Bối cảnh.** Corpus hiện có 16 chunk. Một index ở quy mô đó là chuẩn bị, không phải
+tối ưu.
+
+**Số đo** (chi tiết và cách tái lập: `docs/query_plan.md`):
+
+| Quy mô | Kế hoạch | Execution Time |
+|---:|---|---:|
+| 16 dòng, có index | Index Scan | 0,085 ms |
+| ~20k dòng, có index | Bitmap Heap Scan | 1,237 ms |
+| ~20k dòng, không index | Seq Scan | 3,051 ms |
+
+**Quyết định.** Giữ `ix_chunks_scope (department, access_level, available_at)`. Chưa tạo
+ANN index (HNSW/IVFFlat) cho cột `embedding`.
+
+**Vì sao.** Ở 20k dòng index nhanh hơn ~2,5 lần, và thứ tự cột khớp thứ tự lọc của
+truy vấn retrieval: hai cột so sánh bằng trước, cột so sánh khoảng sau. Mức 2,5 lần là
+khiêm tốn vì query trả về ~17% số dòng — index phát huy nhất khi chọn lọc cao, và lọc
+theo một trong bốn phòng ban thì vốn không chọn lọc.
+
+**Điều đo được trái dự đoán.** Ở 16 dòng, planner **vẫn chọn Index Scan**, không phải
+Seq Scan như dự đoán ban đầu. Chi tiết đáng chú ý hơn là `Planning Time 0,572 ms` so
+với `Execution Time 0,085 ms`: ở quy mô này lập kế hoạch tốn gấp 6 lần thực thi, nên
+không có vấn đề hiệu năng nào để giải quyết.
+
+**Hệ quả.** ANN index mở khi số đo nói cần, không mở vì nghe hợp lý. Mọi con số trên
+đo bằng Docker trên Windows, dùng để so ba kế hoạch với nhau, không phải để báo latency
+của hệ thống.

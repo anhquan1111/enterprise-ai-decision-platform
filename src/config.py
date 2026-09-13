@@ -1,8 +1,8 @@
-"""Application configuration, loaded from environment variables and .env.
+"""Cấu hình ứng dụng, đọc từ biến môi trường và .env.
 
-Every setting has a local-development default so the app starts without a .env
-file. Secrets (LLM_API_KEY) default to empty rather than to a placeholder value,
-so a missing key fails loudly instead of producing confusing auth errors.
+Mọi setting có giá trị mặc định cho môi trường local nên app chạy được khi chưa có
+.env. Riêng secret (LLM_API_KEY) mặc định là rỗng chứ không phải một giá trị giả:
+thiếu key thì phải lỗi rõ ràng, không phải lỗi auth khó hiểu.
 """
 
 from functools import lru_cache
@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Runtime settings for the API and the offline scripts."""
+    """Setting dùng chung cho API và các script offline."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -19,49 +19,48 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── App ────────────────────────────────────────────────
+    # ── App ───────────────────────────────────────────────
     app_name: str = "enterprise-ai-decision-platform"
     app_version: str = "0.1.0"
     environment: str = "local"
     log_level: str = "INFO"
 
     # ── PostgreSQL ─────────────────────────────────────────
-    # 127.0.0.1, not "localhost": on Windows "localhost" resolves to ::1 first and
-    # compose binds the port on 127.0.0.1 only, so the v6 attempt stalls the
-    # connection. See docs/decisions.md ADR-005.
+    # Dùng 127.0.0.1 chứ không phải "localhost": trên Windows localhost resolve ::1
+    # trước, mà compose chỉ publish port trên IPv4, nên mỗi connection phải trả giá
+    # cho một lần thử IPv6 thất bại. Xem ADR-005.
     postgres_host: str = "127.0.0.1"
     postgres_port: int = 5433
     postgres_db: str = "enterprise_ai"
     postgres_user: str = "app"
     postgres_password: str = "app_local_only"
-    # Seconds libpq waits per resolved address before giving up. Without it the
-    # default is "wait indefinitely", which turns an unreachable database into a
-    # hang rather than an error — see docs/decisions.md ADR-005.
+    # Số giây libpq chờ cho MỖI địa chỉ đã resolve. Thiếu tham số này thì mặc định
+    # là chờ vô hạn, biến "database không tới được" thành treo thay vì lỗi. ADR-005.
     postgres_connect_timeout: int = 5
 
-    # ── LLM (chosen on D2 — see docs/decisions.md ADR-002) ──
+    # ── LLM: chốt ở D2, xem ADR-002 ───────────────────────
     llm_provider: str = "unset"
     llm_model: str = "unset"
     llm_api_key: str = ""
 
-    # ── Embeddings (chosen on D2) ──────────────────────────
+    # ── Embedding: chốt ở D2 ──────────────────────────────
     embedding_backend: str = "local"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dim: int = 384
 
     # ── Retrieval ──────────────────────────────────────────
     retrieval_top_k: int = 5
-    # Reciprocal Rank Fusion constant: score = sum(1 / (rrf_k + rank)).
-    # 60 is the value from the original RRF paper; it damps the weight of
-    # top ranks so one engine cannot dominate the fused list.
+    # Hằng số của Reciprocal Rank Fusion: score = sum(1 / (rrf_k + rank)).
+    # 60 là giá trị trong paper gốc, làm dịu trọng số của các hạng đầu để một
+    # engine không áp đảo danh sách sau khi trộn.
     rrf_k: int = 60
 
     @property
     def database_url(self) -> str:
-        """libpq connection string for psycopg.
+        """Connection string cho psycopg.
 
-        Always carries connect_timeout: a database that cannot be reached must
-        fail within a bounded time instead of blocking the caller.
+        Luôn kèm connect_timeout: database không tới được phải lỗi trong thời gian
+        có giới hạn, không được chặn caller vô hạn.
         """
         return (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
@@ -72,10 +71,9 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return the process-wide settings object.
+    """Trả về object setting dùng chung cho cả process.
 
-    Cached so that importing modules do not each re-read the environment, and so
-    tests can clear the cache with ``get_settings.cache_clear()`` after patching
-    environment variables.
+    Cache lại để mỗi module import không phải đọc lại environment. Test muốn đổi
+    biến môi trường thì gọi ``get_settings.cache_clear()``.
     """
     return Settings()
