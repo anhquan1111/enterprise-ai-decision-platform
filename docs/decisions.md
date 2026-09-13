@@ -38,24 +38,113 @@ index. Revisit only if measured latency says so.
 
 ---
 
-## ADR-002 — LLM and embedding provider deliberately unset on D0
+## ADR-002 — Chốt Gemini cho cả generation và embedding
 
-**Date:** D0 · **Status:** open, decide on D2
+**Ngày:** mở ở D0, chốt 13/09/2026 · **Trạng thái:** accepted, chốt bằng số đo
 
-**Context.** Generation and embeddings both need a provider. Anthropic has no
-embedding API; OpenAI and Google have both generation and embeddings; local
-`sentence-transformers` embeddings are free but pull in torch (a large download).
+**Bối cảnh ban đầu (D0).** Không chọn provider ngay, vì chốt vendor trước khi có bộ
+đánh giá sẽ làm phép đo đầu tiên trở thành cuộc so sánh vendor thay vì một baseline của
+hệ thống. `LLM_PROVIDER` và `EMBEDDING_BACKEND` để `unset`, không SDK nào là hard
+dependency.
 
-**Decision.** `LLM_PROVIDER`, `LLM_MODEL` and `EMBEDDING_BACKEND` default to
-`unset`/`local` and are read from the environment. No provider SDK is a hard
-dependency yet; the `embed` and `eval` extras stay optional.
+### Điều đã đo, và nó loại bỏ phương án local
 
-**Why.** Committing the skeleton to one vendor before the eval harness exists
-would make the first measurement a vendor comparison instead of a baseline.
+Máy phát triển: RTX 4060 Laptop 8 GB VRAM, 15,2 GB RAM, Ryzen 7 7840H.
 
-**Consequence.** D2 must pick one and record the exact model name and date in
-`docs/report.md`, because model behaviour changes over time and a number without
-a model name cannot be reproduced.
+Đã cài Ollama và pull `qwen2.5:7b-instruct-q4_K_M` (4,7 GB, đặt trên ổ D:). **Model
+không load được ở cả ba cấu hình:**
+
+| Cấu hình | Lỗi |
+|---|---|
+| GPU đầy (`num_gpu=99`) | `cudaMalloc failed: out of memory` khi cấp 4168 MiB |
+| GPU một phần (`num_gpu=20`) | cùng lỗi |
+| CPU thuần (`num_gpu=0`) | `ggml_backend_cpu_buffer_type_alloc_buffer: failed` |
+
+CPU cũng fail cho thấy **nút thắt là RAM hệ thống, không phải VRAM** — `nvidia-smi` báo
+GPU trống 7956 MiB tại thời điểm đó. Đo lại:
+
+```text
+RAM tổng      : 15,2 GB
+RAM còn trống : 1,1 GB
+Committed     : 28,6 GB / limit 31,2 GB   (15,2 RAM + 16 pagefile)
+```
+
+Chỉ còn **2,6 GB commit headroom**, trong khi model cần một block **4,37 GB**. Và đó là
+lúc chỉ đang mở VS Code, Docker, WSL và trình duyệt — tức môi trường làm việc bình
+thường. Kết luận: **máy này không chạy được model 7B local song song với stack dev.**
+
+### Quyết định
+
+| Thành phần | Chọn | Ghi chú |
+|---|---|---|
+| Generation | **`gemini-3.1-flash-lite`** | Pin phiên bản, không dùng alias `-latest` |
+| Model so sánh | `gemini-3.5-flash` | Dùng cho A/B ở D2 |
+| Embedding | **`gemini-embedding-001`**, `outputDimensionality=384` | Giữ nguyên cột `vector(384)` |
+| Auth | Key trong header `x-goog-api-key` | **Không** để trong query string |
+| API version | `v1beta` | `v1` không có các model này |
+
+### Vì sao các phương án khác bị loại
+
+| Phương án | Lý do loại |
+|---|---|
+| Local Qwen 7B | Không load được — đo ở trên |
+| Anthropic | Không có embedding API; gói thuê tháng không cấp API key, phải nạp credit riêng |
+| OpenAI | Cùng vấn đề gói thuê tháng ≠ API credit; không có key sẵn |
+| `gemini-2.5-flash` | API trả 404: *"no longer available to new users"* |
+| `gemini-3.8-flash` | 2 trên 5 request trả **503 Service Unavailable** trên free tier |
+| `gemini-3.6-flash` | **Không tắt được thinking** — `thinkingBudget=0` trả 400 |
+
+### Số đo, 5 câu hỏi trên corpus thật, JSON mode
+
+Chi tiết: `evidence/bench/`. Tái lập: `uv run python -m scripts.bench_model <model>`.
+
+| Model | Đúng schema | Bịa nguồn | tok/s | Ước tính 40 câu |
+|---|---|---|---:|---:|
+| `gemini-3.1-flash-lite` | **5/5** | **0** | 42,7 | ~1,5 phút |
+| `gemini-3.5-flash` | **5/5** | **0** | 19,2 | ~2,6 phút |
+
+Cả hai trả lời đúng, trích đúng nguồn, và **tự bắc cầu được qua khác biệt dấu**: corpus
+viết không dấu, câu hỏi có dấu, câu trả lời trả về có dấu đúng chính tả.
+
+**Một ca đáng chú ý.** Câu *"Khoản chi 80 triệu đồng thì ai duyệt?"* chạy với
+`role="manager"`. Chunk chứa đáp án (`FIN-014#2`, "trên 50 triệu → Giám đốc") có
+`access_level = executive` nên **bị phạm vi quyền loại khỏi context**. Cả hai model
+đều trả `abstained=true, citations=[]` thay vì đoán "Giám đốc" từ kiến thức có sẵn.
+
+Đây là bằng chứng đo được cho hai thứ cùng lúc: phân quyền áp ở tầng truy vấn có hiệu
+lực thật, và model từ chối đúng lúc khi bằng chứng bị chặn.
+
+### Cái bẫy phải nhớ: thinking token trừ vào max output
+
+Gemini 3.x bật thinking mặc định, và **`thoughtsTokenCount` được tính vào
+`maxOutputTokens`**. Đo được với `maxOutputTokens=80`:
+
+```text
+gemini-3.6-flash : think=75  out=1     finish=MAX_TOKENS
+gemini-3.8-flash : think=101 out=None  finish=MAX_TOKENS   -> content rỗng
+gemini-3.5-flash : think=77  out=None  finish=MAX_TOKENS   -> content rỗng
+```
+
+Response rỗng nhưng HTTP 200. Nếu không kiểm `finishReason`, nó sẽ hiện ra dưới dạng
+một lỗi parse JSON khó hiểu ở tầng trên. `llm_max_output_tokens` đặt **1200**, và
+`scripts/bench_model.py` gọi đúng tên trường hợp này: `response rong (finish=...)`.
+
+Đây chính là bài học `reserve_output` của ngày 19, chỉ khác ở chỗ phần dự trữ còn phải
+nuôi một người tiêu thụ vô hình.
+
+### Hệ quả
+
+- **Không đổi schema:** `outputDimensionality=384` khớp cột `vector(384)` đang có.
+  Đánh đổi: 384 là bản cắt Matryoshka của vector 3072 chiều, nên mất một phần chất
+  lượng. Mức mất chỉ đo được trên bộ eval ở D2; nếu đáng kể thì đổi cột và ingest lại —
+  rẻ vì corpus chỉ 16 chunk.
+- **Mọi báo cáo số liệu phải ghi tên model và ngày chạy.** Hành vi model đổi theo bản
+  phát hành; một con số không có tên model thì không tái lập được.
+- **5 câu là smoke test, không phải đánh giá.** Nó nói model chạy được và tuân schema;
+  nó không nói model tốt tới đâu. Khác biệt giữa hai model chỉ lộ ra trên bộ 40 câu ở
+  D2.
+- Ollama và Qwen 7B **giữ lại** làm cấu hình đối chiếu khi máy rảnh, và là một mục thật
+  trên CV: chạy model local, đo được giới hạn bộ nhớ, chọn API dựa trên số đo.
 
 ---
 

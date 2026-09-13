@@ -17,20 +17,35 @@ from enum import StrEnum
 
 import pandas as pd
 
+from src.scope import (
+    ALLOWED_ACCESS_LEVELS,
+    ALLOWED_DEPARTMENTS,
+    ROLE_VISIBLE_LEVELS,
+    visible_access_levels,
+)
+
+__all__ = [
+    "ALLOWED_ACCESS_LEVELS",
+    "ALLOWED_DEPARTMENTS",
+    "ROLE_VISIBLE_LEVELS",
+    "visible_access_levels",
+    "CONTRACT_VERSION",
+    "ContractError",
+    "Severity",
+    "ValidationResult",
+    "Violation",
+    "check_dtypes",
+    "check_schema",
+    "validate",
+]
+
 CONTRACT_VERSION = "1.0.0"
 
 # Grain: một dòng là một chunk của một document.
 NATURAL_KEY: tuple[str, ...] = ("doc_id", "chunk_index")
 
-ALLOWED_ACCESS_LEVELS: frozenset[str] = frozenset({"employee", "manager", "executive"})
-ALLOWED_DEPARTMENTS: frozenset[str] = frozenset({"sales", "hr", "finance", "engineering"})
-
-# Thứ bậc quyền: một role đọc được mức của chính nó và mọi mức thấp hơn.
-ROLE_VISIBLE_LEVELS: dict[str, tuple[str, ...]] = {
-    "employee": ("employee",),
-    "manager": ("employee", "manager"),
-    "executive": ("employee", "manager", "executive"),
-}
+# Quy tắc phạm vi quyền sống ở src/scope.py (không phụ thuộc pandas) và được
+# re-export ở đây để chỗ gọi cũ không phải đổi. Xem docstring của scope.py.
 
 REQUIRED_COLUMNS: tuple[str, ...] = (
     "doc_id",
@@ -92,15 +107,6 @@ class ValidationResult:
 
 class ContractError(Exception):
     """Vi phạm mức batch, không phải mức dòng: loại vài dòng không sửa được."""
-
-
-def visible_access_levels(role: str) -> list[str]:
-    """Các mức quyền mà một role được đọc.
-
-    Dùng cho truy vấn retrieval. Role lạ trả về danh sách rỗng thay vì mức thấp nhất:
-    không biết người gọi là ai thì không cho thấy gì, chứ không đoán.
-    """
-    return list(ROLE_VISIBLE_LEVELS.get(role, ()))
 
 
 def check_schema(frame: pd.DataFrame) -> None:

@@ -42,8 +42,11 @@ Hướng dẫn cho AI CLI (Claude Code, Gemini, Copilot, Cursor) khi làm việc
 | pytest, ruff, mypy | — | Test, lint, type check |
 | MLflow | >=2.17 | Tracking mỗi eval run (extra `eval`, từ D2) |
 | prometheus-client | >=0.26 | Metrics (từ D4) |
+| Gemini API | v1beta | `gemini-3.1-flash-lite` sinh, `gemini-embedding-001` embed |
 
-**Quyết định còn mở:** LLM provider và embedding backend — xem `docs/decisions.md` ADR-002.
+**LLM provider đã chốt (ADR-002):** Gemini, key trong `.env` (`LLM_API_KEY`), auth bằng
+header `x-goog-api-key` chứ không qua query string. Local 7B đã thử và **không chạy được**
+trên máy này vì hết commit headroom — số đo trong ADR-002.
 
 ---
 
@@ -177,6 +180,16 @@ toàn bộ corpus tài liệu. Bản đầu của `sql/02_seed.sql` mắc đúng
 `python scripts/ingest.py` không import được `src` vì project root không nằm trong
 sys.path. `python -m scripts.ingest` thì có. Đừng chèn sys.path trong code để lách.
 
+### Thinking token trừ vào max output
+
+Gemini 3.x bật thinking mặc định và `thoughtsTokenCount` tính vào `maxOutputTokens`. Đặt
+thấp (ví dụ 400) thì thinking ăn hết, API trả **HTTP 200 với content rỗng** và
+`finishReason=MAX_TOKENS`. Ở tầng trên nó hiện ra thành lỗi parse JSON khó hiểu.
+`llm_max_output_tokens` đặt 1200; luôn kiểm `finishReason` trước khi parse.
+
+`gemini-3.6-flash` không tắt được thinking (`thinkingBudget=0` trả 400). Nếu đổi model,
+phải thử lại điều này.
+
 ### Eval trước tối ưu
 
 D2 phải có bộ eval và số baseline **trước** khi D3 đổi retrieval. Đây là nguyên tắc cứng, không phải thứ tự cho tiện.
@@ -218,7 +231,7 @@ Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md và
 docs/decisions.md.
 D2 (roadmap Ngày 19+20): dense retrieval + structured output cho /ask, rồi viết
 bộ eval 40 câu có ground truth (28 dev / 12 held-out) và ĐO BASELINE trước khi
-tối ưu bất cứ gì. Chốt LLM provider + embedding backend (ADR-002) trước khi code.
+tối ưu bất cứ gì. Provider đã chốt ở ADR-002: Gemini, key có sẵn trong .env.
 Kiểm codebase hiện tại rồi bắt đầu.
 ```
 

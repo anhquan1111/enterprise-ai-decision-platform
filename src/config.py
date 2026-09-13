@@ -38,15 +38,23 @@ class Settings(BaseSettings):
     # là chờ vô hạn, biến "database không tới được" thành treo thay vì lỗi. ADR-005.
     postgres_connect_timeout: int = 5
 
-    # ── LLM: chốt ở D2, xem ADR-002 ───────────────────────
-    llm_provider: str = "unset"
-    llm_model: str = "unset"
+    # ── LLM: đã chốt ở ADR-002 ────────────────────────────
+    llm_provider: str = "google"
+    # Pin phiên bản cụ thể, KHÔNG dùng alias "-latest": alias đổi model dưới chân bạn
+    # và làm mọi số đo cũ không so được với số mới.
+    llm_model: str = "gemini-3.1-flash-lite"
     llm_api_key: str = ""
 
-    # ── Embedding: chốt ở D2 ──────────────────────────────
-    embedding_backend: str = "local"
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    # ── Embedding: đã chốt ở ADR-002 ──────────────────────
+    embedding_backend: str = "api"
+    embedding_model: str = "gemini-embedding-001"
+    # 384 chiều là do Matryoshka truncation (outputDimensionality), không phải chiều
+    # gốc của model — gốc là 3072. Chọn 384 để giữ nguyên cột vector(384) của schema.
     embedding_dim: int = 384
+
+    # Gemini 3.x bật "thinking" mặc định và thinking token TRỪ VÀO max_output_tokens.
+    # Đặt quá thấp thì response rỗng với finishReason=MAX_TOKENS. Xem ADR-002.
+    llm_max_output_tokens: int = 1200
 
     # ── Retrieval ──────────────────────────────────────────
     retrieval_top_k: int = 5

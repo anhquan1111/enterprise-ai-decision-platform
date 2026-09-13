@@ -47,6 +47,23 @@ def test_database_host_defaults_to_ipv4_literal() -> None:
     assert Settings().postgres_host == "127.0.0.1"
 
 
+def test_llm_model_is_pinned_not_a_latest_alias() -> None:
+    """Tên model phải cố định, không dùng alias kiểu "-latest".
+
+    Alias trỏ sang model mới theo thời gian, nên một số đo báo hôm nay sẽ không so được
+    với số đo tháng sau, và không ai biết vì sao. Xem docs/decisions.md ADR-002.
+    """
+    model = Settings().llm_model
+
+    assert model
+    assert "latest" not in model
+
+
 def test_api_key_defaults_to_empty_not_placeholder() -> None:
-    """A missing key must be empty so it fails loudly, not a fake-looking value."""
-    assert Settings().llm_api_key == ""
+    """Thiếu key thì phải rỗng để lỗi rõ ràng, không phải một giá trị trông như thật.
+
+    Assert bằng boolean chứ không so sánh giá trị: nếu test này fail trên một máy có
+    .env thật, một assertion so sánh chuỗi sẽ **in luôn secret** vào output và vào log
+    CI. Cách ly khỏi .env do conftest lo; đây là lớp phòng thứ hai.
+    """
+    assert not Settings().llm_api_key

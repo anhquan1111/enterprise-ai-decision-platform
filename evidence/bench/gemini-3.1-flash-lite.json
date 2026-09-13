@@ -1,0 +1,82 @@
+{
+  "summary": {
+    "model": "gemini-3.1-flash-lite",
+    "so_cau": 5,
+    "schema_dat": "5/5",
+    "co_bia_nguon": 0,
+    "tok_per_s_trung_binh": 42.7,
+    "uoc_tinh_40_cau_phut": 1.5
+  },
+  "results": [
+    {
+      "department": "finance",
+      "question": "Khoản chi 80 triệu đồng thì ai duyệt?",
+      "wall_s": 1.46,
+      "prompt_tokens": 262,
+      "output_tokens": 56,
+      "thinking_tokens": 0,
+      "finish_reason": "STOP",
+      "tok_per_s": 38.5,
+      "schema_ok": true,
+      "schema_error": null,
+      "fabricated_citations": [],
+      "raw": "{\n  \"answer\": \"Các tài liệu được cung cấp không đề cập đến quy trình phê duyệt cho khoản chi 80 triệu đồng, do đó tôi không thể trả lời câu hỏi này.\",\n  \"citations\": [],\n  \"abstained\": true\n}"
+    },
+    {
+      "department": "finance",
+      "question": "Trưởng phòng được phê duyệt tối đa bao nhiêu?",
+      "wall_s": 1.4,
+      "prompt_tokens": 261,
+      "output_tokens": 102,
+      "thinking_tokens": 0,
+      "finish_reason": "STOP",
+      "tok_per_s": 73.0,
+      "schema_ok": true,
+      "schema_error": null,
+      "fabricated_citations": [],
+      "raw": "{\n  \"answer\": \"Trưởng phòng được phê duyệt đề xuất chi tối đa 50 triệu đồng trong phạm vi ngân sách của phòng.\",\n  \"citations\": [\n    {\n      \"chunk_id\": \"FIN-014#1\",\n      \"quote\": \"Truong phong phe duyet de xuat chi toi 50 trieu dong trong pham vi ngan sach phong.\"\n    }\n  ],\n  \"abstained\": false\n"
+    },
+    {
+      "department": "hr",
+      "question": "Nhân viên được bao nhiêu ngày phép một năm?",
+      "wall_s": 1.55,
+      "prompt_tokens": 268,
+      "output_tokens": 90,
+      "thinking_tokens": 0,
+      "finish_reason": "STOP",
+      "tok_per_s": 57.9,
+      "schema_ok": true,
+      "schema_error": null,
+      "fabricated_citations": [],
+      "raw": "{\n  \"answer\": \"Nhân viên chính thức được hưởng 12 ngày phép có lương mỗi năm.\",\n  \"citations\": [\n    {\n      \"chunk_id\": \"HR-001#0\",\n      \"quote\": \"Nhan vien chinh thuc duoc 12 ngay phep co luong moi nam.\"\n    }\n  ],\n  \"abstained\": false\n}"
+    },
+    {
+      "department": "engineering",
+      "question": "Release cần qua những bước nào trước khi lên production?",
+      "wall_s": 5.29,
+      "prompt_tokens": 220,
+      "output_tokens": 95,
+      "thinking_tokens": 0,
+      "finish_reason": "STOP",
+      "tok_per_s": 17.9,
+      "schema_ok": true,
+      "schema_error": null,
+      "fabricated_citations": [],
+      "raw": "{\n  \"answer\": \"Trước khi lên production, mỗi release phải trải qua quy trình code review và đảm bảo pipeline CI đạt trạng thái xanh.\",\n  \"citations\": [\n    {\n      \"chunk_id\": \"ENG-007#0\",\n      \"quote\": \"Moi release phai qua code review va pipeline CI xanh truoc khi len production.\"\n    }\n  ],\n  \"a"
+    },
+    {
+      "department": "hr",
+      "question": "Công ty có chính sách xe đưa rước nhân viên không?",
+      "wall_s": 1.68,
+      "prompt_tokens": 271,
+      "output_tokens": 44,
+      "thinking_tokens": 0,
+      "finish_reason": "STOP",
+      "tok_per_s": 26.2,
+      "schema_ok": true,
+      "schema_error": null,
+      "fabricated_citations": [],
+      "raw": "{\n  \"answer\": \"Các tài liệu được cung cấp không đề cập đến chính sách xe đưa rước nhân viên của công ty.\",\n  \"citations\": [],\n  \"abstained\": true\n}"
+    }
+  ]
+}
