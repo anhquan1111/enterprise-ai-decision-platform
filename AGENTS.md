@@ -40,7 +40,7 @@ Hướng dẫn cho AI CLI (Claude Code, Gemini, Copilot, Cursor) khi làm việc
 | psycopg | >=3.2 | DB driver, raw SQL (không ORM) |
 | Pydantic | >=2.9 | Request/response contract |
 | pytest, ruff, mypy | — | Test, lint, type check |
-| MLflow | >=2.17 | Tracking mỗi eval run (extra `eval`, từ D2) |
+| MLflow | >=2.17 | Tracking mỗi eval run (extra `eval`) — **chưa dùng**, D2 chỉ ghi JSONL/JSON thô. Thêm nếu số lần chạy eval nhiều tới mức JSON thô khó so sánh |
 | prometheus-client | >=0.26 | Metrics (từ D4) |
 | Gemini API | v1beta | `gemini-3.1-flash-lite` sinh, `gemini-embedding-001` embed |
 
@@ -55,7 +55,7 @@ trên máy này vì hết commit headroom — số đo trong ADR-002.
 ```bash
 # Môi trường (PowerShell hoặc bash trên Windows)
 uv sync --extra dev                 # Dependencies + dev tools
-uv sync --extra dev --extra eval    # Thêm MLflow + BM25 (từ D2)
+uv sync --extra dev --extra eval    # MLflow + BM25 — cài trước cho D3, D2 chưa dùng
 
 # Database
 docker compose up -d db             # Chỉ bật PostgreSQL (dev thường ngày)
@@ -165,9 +165,21 @@ Sau khi thêm timeout, chạy lại với `POSTGRES_HOST=localhost` mất **10,9
 
 `get_connection(read_only=True)` là mặc định. Đường trả lời câu hỏi không bao giờ cần ghi dữ liệu nghiệp vụ, nên một bug hoặc một câu SQL do LLM sinh ra cũng không sửa được dữ liệu. Ingestion và audit log truyền `read_only=False` một cách tường minh.
 
-### Vì sao `/ask` trả 501 ở D0
+### `/ask` trả 501 ở D0, trả lời thật từ D2
 
-Một stub trả lời trông như thật sẽ làm endpoint trông như đã xong, và đó đúng là hành vi project này được xây để phản đối. Test `test_ask_is_honestly_unimplemented` sẽ phải được viết lại khi D2 implement thật — để việc đổi hành vi là hành động có ý thức.
+Stub 501 tồn tại đúng một mục đích: một câu trả lời trông như thật ở D0 sẽ làm endpoint trông như đã xong. Test `test_ask_is_honestly_unimplemented` được viết lại thành `test_api.py` hiện tại khi D2 implement thật, đúng như dòng ghi chú của nó đã yêu cầu — đây là ví dụ hiếm hoi một test tự ra lệnh cho việc sửa nó trong tương lai.
+
+### pgvector: phải cast tường minh `::vector` trong SQL
+
+`register_vector(conn)` không đủ để psycopg tự nhận ra một `list[float]` truyền qua tham số là kiểu `vector` — nó vẫn gửi đi như mảng `double precision[]`, và PostgreSQL báo `operator does not exist: vector <=> double precision[]`. Luôn viết `%(qvec)s::vector` trong câu SQL, không chỉ dựa vào `register_vector`.
+
+### So khớp từ khóa tiếng Việt phải bỏ dấu cả hai phía
+
+Corpus và rubric trong `eval/*.jsonl` viết không dấu, nhưng Gemini luôn trả lời có dấu đầy đủ — đúng hành vi mong muốn, sai giả định nếu so chuỗi trực tiếp: `"khong duoc"` không phải chuỗi con của `"không được"`. `src/eval_taxonomy.py` có `_fold()` chuẩn hoá cả hai phía bằng NFD trước khi so, xử lý riêng `đ`/`Đ` vì đó là chữ cái Latin, không phải tổ hợp dấu. Thiếu bước này thì gần như mọi câu đúng bị chấm sai — đã xảy ra thật khi đo baseline D2.
+
+### `department` không phải ranh giới bảo mật cho docs retrieval
+
+Chỉ `access_level` (qua `visible_access_levels`) và thời điểm lọc docs — `department` là phân loại nội dung, không phải quyền. Một nhân viên Sales được phép đọc chính sách nghỉ phép của HR. Ranh giới department thật sự (nếu cần) thuộc về tool SQL ở D3, xem ADR-009.
 
 ### TRUNCATE ... CASCADE xóa nhiều hơn bảng được nêu tên
 
@@ -206,8 +218,8 @@ Lịch học tương ứng nằm ở `CHIEN_LUOC_HOC_VA_LAM_PROJECT_RIKKEI.md` t
 |---|---|---|---|
 | **D0** | DONE | Ngày 5 (pandas) | Skeleton: `compose.yaml`, `Dockerfile`, `src/{api,config,db,schemas}.py`, 7 tests, CI, `docs/{architecture,decisions}.md` |
 | **D1** | DONE | Ngày 6 + 7 | `sql/01_schema.sql` (7 bảng), `sql/02_seed.sql`, `sql/03_business_metrics.sql`, `sql/04_docs_point_in_time.sql`, `sql/05_explain.sql`, `src/contracts.py`, `scripts/ingest.py`, `data/documents.csv` (16 chunk) + `documents_dirty.csv`, 32 tests, `docs/query_plan.md` |
-| **D2** | TODO | Ngày 19 + 20 | `src/retrieval/dense.py`, `src/generation.py` (structured output), `eval/questions.jsonl` (40 câu: 28 dev / 12 held-out), `scripts/run_eval.py`, `evidence/eval_baseline.json` |
-| **D3** | TODO | Ngày 21 + 22 | `src/retrieval/{lexical,fusion}.py`, `evidence/eval_hybrid.json` + bảng so sánh, `src/agent/` (2 tool, timeout, retry, max_steps), test prompt injection |
+| **D2** | DONE | Ngày 19 + 20 | `src/embeddings.py`, `src/retrieval.py` (dense, pgvector), `src/generation.py` (structured output, 2 cổng kiểm), `src/eval_taxonomy.py` (8 nhãn), `scripts/{backfill_embeddings,run_eval}.py`, `eval/dev.jsonl` (25 câu), `docs/report.md`, 50 unit + 11 integration tests |
+| **D3** | TODO | Ngày 21 + 22 | Đo trước: baseline D2 đã recall@3=100% trên 25 câu — kiểm bộ câu hỏi có đủ khó để hybrid có gì cải thiện không, đừng làm hybrid chỉ vì kế hoạch cũ nói vậy. `src/agent/` (2 tool: SQL + docs, timeout, retry, max_steps), test prompt injection |
 | **D4** | TODO | Ngày 25 + 26 | `src/security/scope.py`, `tests/test_rbac_isolation.py`, `src/audit.py`, Prometheus metrics, `docs/runbook.md` |
 | **D5** | TODO | Ngày 29 | `docs/report.md` (chạy 12 câu held-out **một lần**), README hoàn chỉnh, video demo, bullet CV |
 
@@ -224,7 +236,7 @@ trước/sau index.
 Kiểm codebase hiện tại rồi bắt đầu.
 ```
 
-**D2:**
+**D2 (hoàn thành 14/09/2026):**
 
 ```text
 Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md và
@@ -235,15 +247,21 @@ tối ưu bất cứ gì. Provider đã chốt ở ADR-002: Gemini, key có sẵ
 Kiểm codebase hiện tại rồi bắt đầu.
 ```
 
+Kết quả thật khác kế hoạch ở một chỗ đáng ghi: chỉ 25 câu (không phải 40), và
+`eval/final.jsonl` **để trống** — 5 câu held-out ban đầu bị chạy sớm ở D2 (lỗi quy
+trình, xem ADR-010), đã gộp vào dev với hậu tố `_seen_at_d2`. D5 cần viết một tập
+held-out mới, sau khi D3+D4 xong.
+
 **D3:**
 
 ```text
-Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md và
-evidence/eval_baseline.json.
-D3 (roadmap Ngày 21+22): thêm lexical search + RRF fusion, đo lại trên ĐÚNG bộ
-dev của D2, rồi xây agent 2 tool (SQL + docs) có timeout/retry/max_steps và test
-prompt injection. Rerank chỉ làm nếu còn giờ, và phải đo cả latency trước khi
-quyết định giữ.
+Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md,
+docs/decisions.md (ADR-010) và docs/report.md.
+D3 (roadmap Ngày 21+22): baseline D2 đã recall@3=100% trên 25 câu dev (corpus 16
+chunk) — TRƯỚC KHI code hybrid, viết thêm câu hỏi khó hơn hoặc corpus lớn hơn để
+biết dense retrieval còn giới hạn ở đâu; nếu không có gì để cải thiện thì ghi rõ
+lý do không làm hybrid, đừng làm vì kế hoạch cũ nói vậy. Xây agent 2 tool (SQL +
+docs) có timeout/retry/max_steps và test prompt injection.
 Kiểm codebase hiện tại rồi bắt đầu.
 ```
 

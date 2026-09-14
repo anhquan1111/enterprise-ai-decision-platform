@@ -65,18 +65,23 @@ Each day adds one layer and leaves the previous layers working. The
 evaluation harness comes **before** the retrieval improvements on purpose: without
 a baseline measured first, "hybrid search is better" is an opinion.
 
-| Day | Layer | Depends on |
-|---|---|---|
-| D0 | Skeleton: config, DB access, contracts, health/ready, CI | — |
-| D1 | Schema + contract-validated ingestion | D0 |
-| D2 | Dense retrieval, structured output, **eval set + baseline numbers** | D1 |
-| D3 | Hybrid retrieval measured against D2 baseline, agent routing | D2 |
-| D4 | RBAC scoping, audit log, timeouts | D1, D3 |
-| D5 | Final report on held-out questions, README, demo | all |
+| Day | Layer | Depends on | Status |
+|---|---|---|---|
+| D0 | Skeleton: config, DB access, contracts, health/ready, CI | — | done |
+| D1 | Schema + contract-validated ingestion | D0 | done |
+| D2 | Dense retrieval, structured output, **eval set + baseline numbers** | D1 | done — `docs/report.md` |
+| D3 | Hybrid retrieval measured against D2 baseline, agent routing | D2 | not started |
+| D4 | RBAC scoping (SQL tool), audit log, timeouts | D1, D3 | not started — docs retrieval already scopes by role (D1/D2) |
+| D5 | Final report on a fresh held-out set, README, demo | all | not started |
 
 ## Known limits (kept current)
 
-- `/ask` returns 501 until D2. The contract is enforced; the answer path is not built.
+- `/ask` answers document questions (D2): dense retrieval, RBAC and point-in-time
+  filtered, structured output with two validation gates. It does not yet answer
+  business-number questions or route between tools — no SQL tool and no agent
+  exist yet (D3). A revenue question is treated as no evidence and abstains,
+  which is accurate but not useful.
+- No audit logging yet (D4). The `audit_log` table exists; nothing writes to it.
 - The corpus is synthetic, written for this project. No real company documents.
 - Exact vector search, no ANN index — correct at a few hundred chunks, not a
   statement about scale.

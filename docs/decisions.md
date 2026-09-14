@@ -338,3 +338,90 @@ không có vấn đề hiệu năng nào để giải quyết.
 **Hệ quả.** ANN index mở khi số đo nói cần, không mở vì nghe hợp lý. Mọi con số trên
 đo bằng Docker trên Windows, dùng để so ba kế hoạch với nhau, không phải để báo latency
 của hệ thống.
+
+---
+
+## ADR-009 — Docs retrieval lọc theo role, không lọc theo department
+
+**Ngày:** D2 · **Trạng thái:** accepted, làm rõ lại một câu trong tài liệu D0
+
+**Bối cảnh.** `AskRequest` docstring (viết ở D0) nói: "Role và department nằm trong
+request... mọi truy cập dữ liệu phía dưới đều bị giới hạn theo hai trường này." Khi
+xây `src/retrieval.py` thật, áp cả hai làm ranh giới cứng sẽ khiến một nhân viên
+Sales không bao giờ đọc được chính sách nghỉ phép của HR — vì `HR-001` có
+`department='hr'`, khác `department='sales'` của người hỏi.
+
+**Quyết định.** Đường tài liệu (docs) chỉ lọc theo `access_level` (qua
+`visible_access_levels(role)`). `department` trên mỗi chunk là **phân loại nội dung**,
+không phải ranh giới bảo mật cho tài liệu chính sách. Ranh giới bảo mật thật của docs
+là `access_level` (employee/manager/executive) và thời điểm (`available_at`,
+`effective_from/to`), cả hai đã áp trong `WHERE` trước khi tính khoảng cách vector.
+
+**Vì sao.** Tài liệu chính sách nội bộ (nghỉ phép, quy trình release, hạn mức chi) là
+tài liệu tham khảo chung toàn công ty — một nhân viên Sales hỏi "release lỗi thì xử lý
+sao" là câu hỏi hợp lệ, không phải hành vi cần chặn. Ràng buộc department chỉ có ý
+nghĩa thật cho **tool SQL** (D3): doanh thu của phòng Sales là số liệu Sales sở hữu,
+và một nhân viên phòng khác không cần thấy nó ở dạng số thô.
+
+**Hệ quả.** `department` trong `AskRequest` vẫn giữ nguyên schema — nó sẽ dùng để
+scope tool SQL khi tool đó được xây ở D3, không phải bỏ đi. Bộ eval của D2 cố tình có
+câu hỏi liên phòng ban (một employee HR hỏi về quy trình Engineering) để phản ánh đúng
+thiết kế này; nếu sau này router (D3) cần siết department cho SQL, ADR đó sẽ ghi riêng.
+
+---
+
+## ADR-010 — Baseline D2 đo trên 25 câu dev; held-out chạy sớm là một lỗi, đã sửa
+
+**Ngày:** D2 · **Trạng thái:** accepted, có tự sửa lỗi quy trình
+
+**Số đo baseline** (chi tiết: `evidence/eval_summary_dev.json`, tái lập bằng
+`uv run python -m scripts.run_eval --report`), model `gemini-3.1-flash-lite` sinh câu
+trả lời, `gemini-embedding-001` (384 chiều) cho cả embed tài liệu và câu hỏi, đo
+13/09–14/09/2026:
+
+| Chỉ số | Kết quả |
+|---|---|
+| recall@3 / @5 / @10 | 18/18 (100%) — bằng nhau ở mọi k vì gold luôn đứng hạng 1 |
+| MRR | 1,000 |
+| Đúng hoàn toàn (`correct`) | 18/18 |
+| Từ chối đúng vì hết quyền (`access_correct`) | 5/5 |
+| Từ chối đúng vì corpus không có (`no_knowledge_correct`) | 2/2 |
+| Vi phạm quyền, bịa nguồn, trích sai, retrieval trượt | **0** ở mọi nhóm |
+
+So với baseline TF-IDF của bài học RAG_Evaluation (ngày 20) trên một corpus khác:
+recall@3 khi đó là 92,3%, có 1 câu retrieval trượt do khác biệt từ vựng ("release lỗi"
+xếp hạng 5). Cùng loại câu hỏi đó, chạy bằng dense embedding thật trên corpus của dự
+án này xếp **hạng 1** (cosine distance 0,208) — đúng như dense retrieval được kỳ vọng
+sửa lỗi từ vựng của baseline từ khóa.
+
+**Một lỗi rubric thật, đã sửa trước khi chạy hết bộ.** Câu hỏi về số liệu tạm tính có
+rubric `expected_answer_keywords=["khong dung"]`. Model trả lời hoàn toàn đúng —
+*"không **được** dùng để báo cáo ra bên ngoài"* — nhưng "khong dung" không phải chuỗi
+con của "không được dùng", nên bị chấm nhầm thành `generation_wrong_fact`. Sửa rubric
+thành `["khong duoc dung", "khong dung"]` rồi chạy lại đúng câu đó. Đây là ví dụ thật
+của bài học ngày 20: rubric từ khóa phải bao trùm cách diễn đạt hợp lý, không chỉ một
+cách nói.
+
+**Một lỗi kỹ thuật thật, đã sửa trước khi chạy bất kỳ câu nào.** `expected_answer_keywords`
+và corpus viết không dấu, nhưng Gemini luôn trả lời bằng tiếng Việt có dấu đầy đủ —
+đúng hành vi mong muốn cho người dùng thật. So khớp chuỗi trực tiếp không bao giờ
+khớp ("khong duoc" không phải chuỗi con của "không được"). `src/eval_taxonomy.py`
+chuẩn hóa cả hai phía bằng cách bỏ dấu (NFD, xử lý riêng "đ") trước khi so — nếu không
+sửa, gần như mọi câu đúng sẽ bị chấm sai.
+
+**Lỗi quy trình: chạy held-out ở D2, đáng lẽ để dành cho D5.**
+`docs/architecture.md` ghi rõ "Final report on held-out questions" là việc của D5, sau
+khi hybrid retrieval (D3) và RBAC/audit (D4) đã có — hệ thống ở D2 chưa phải hệ thống
+cuối cùng. Chạy 5 câu `eval/final.jsonl` ngay hôm nay là chạy sớm, và theo đúng quy
+tắc đã ghi ở ngày 19 ("nhiễm thì không xoá, không giả vờ chưa xem — chuyển thành dev,
+viết tập cuối mới"): 5 câu đó đã đổi tên thành `F0x_seen_at_d2` và gộp vào
+`eval/dev.jsonl`. `eval/final.jsonl` để trống, chờ D5 viết một tập held-out mới trên
+hệ thống thật sự hoàn chỉnh.
+
+**Điều chưa đo được, ghi đúng như vậy.** 25 câu là quy mô học tập trên một corpus 16
+chunk — đủ để tìm lỗi và xác nhận cơ chế, không đủ để tuyên bố hệ thống đáng tin cậy
+ở mọi tình huống. Baseline "sạch tuyệt đối" (0 lỗi) một phần phản ánh corpus nhỏ và
+câu hỏi rõ ràng; D3 cần bộ câu hỏi khó hơn hoặc corpus lớn hơn mới biết dense retrieval
+còn giới hạn ở đâu — nếu baseline đã hoàn hảo, hybrid retrieval (kế hoạch ban đầu của
+D3) có thể không có gì để cải thiện, và quyết định đó cần đo trước khi làm, không mặc
+định làm theo kế hoạch cũ.

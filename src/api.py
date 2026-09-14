@@ -1,21 +1,25 @@
 """FastAPI application.
 
-Phạm vi hiện tại: service khởi động được, báo liveness/readiness, và áp contract cho
-/ask. /ask vẫn trả 501 cho tới khi tầng retrieval và agent xong (D2-D3) — một stub
-trả về câu trả lời trông như thật sẽ làm endpoint trông như đã hoàn thiện, và đó
-đúng là hành vi project này được xây để phản đối.
+Phạm vi hiện tại (D2): /ask trả lời được câu hỏi tài liệu bằng dense retrieval +
+structured output, có RBAC và abstention. Chưa có: tool SQL cho số liệu kinh doanh và
+agent chọn giữa hai tool — đó là D3 (``agent routing`` theo docs/architecture.md).
+/ask hôm nay luôn dùng tool DOCS; hỏi số liệu doanh thu sẽ bị coi là không có bằng
+chứng và bị abstain, không phải bị trả lời sai.
 """
 
 import logging
 import time
 import uuid
 
+import httpx
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
 
 from src.config import get_settings
 from src.db import check_connection
-from src.schemas import AskRequest, HealthResponse, ReadyResponse
+from src.generation import GroundedAnswer, SchemaFailure, answer_question
+from src.retrieval import retrieve
+from src.schemas import AskRequest, AskResponse, Citation, HealthResponse, ReadyResponse, ToolUsed
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
@@ -59,12 +63,26 @@ def ready() -> JSONResponse:
     return JSONResponse(status_code=code, content=payload.model_dump())
 
 
-@app.post("/ask", tags=["qa"], status_code=status.HTTP_501_NOT_IMPLEMENTED)
-def ask(request: AskRequest) -> JSONResponse:
-    """Trả lời câu hỏi trong phạm vi quyền của người gọi.
+def _to_response_citations(result: GroundedAnswer) -> list[Citation]:
+    return [
+        Citation(
+            source_type=ToolUsed.DOCS,
+            doc_id=c.chunk_id.split("#")[0],
+            chunk_index=int(c.chunk_id.split("#")[1]),
+            quote=c.quote,
+        )
+        for c in result.answer.citations
+    ]
 
-    Chưa implement. Contract của request thì đã áp: role lạ hoặc câu hỏi rỗng bị
-    chặn với 422 ngay từ hôm nay.
+
+@app.post("/ask", response_model=AskResponse, tags=["qa"])
+def ask(request: AskRequest) -> JSONResponse:
+    """Trả lời câu hỏi tài liệu trong phạm vi quyền của người gọi.
+
+    Luồng: retrieval (đã lọc quyền + thời điểm) -> generation có JSON mode -> hai
+    cổng kiểm (schema, bằng chứng). Cổng bằng chứng không chặn response — nó được
+    ghi lại để audit (D4), vì một câu trả lời có vấn đề grounding vẫn cần trả về cho
+    người dùng kèm cảnh báo, không phải biến mất thành lỗi 500 im lặng.
     """
     request_id = str(uuid.uuid4())
     started = time.perf_counter()
@@ -75,12 +93,41 @@ def ask(request: AskRequest) -> JSONResponse:
         request.role,
         request.department,
     )
+
+    try:
+        chunks = retrieve(request.question, role=request.role.value, k=settings.retrieval_top_k)
+        result = answer_question(request.question, chunks)
+    except SchemaFailure as exc:
+        logger.error("request_id=%s generation gave up: %s", request_id, exc)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"request_id": request_id, "detail": str(exc), "latency_ms": elapsed_ms},
+        )
+    except httpx.HTTPError as exc:
+        logger.error("request_id=%s upstream call failed: %s", request_id, exc)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "request_id": request_id,
+                "detail": f"upstream error: {type(exc).__name__}",
+                "latency_ms": elapsed_ms,
+            },
+        )
+
+    if result.grounding_problems:
+        logger.warning(
+            "request_id=%s grounding problems: %s", request_id, result.grounding_problems
+        )
+
     elapsed_ms = int((time.perf_counter() - started) * 1000)
-    return JSONResponse(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        content={
-            "request_id": request_id,
-            "detail": "Not implemented yet: retrieval lands on D2, agent routing on D3.",
-            "latency_ms": elapsed_ms,
-        },
+    response = AskResponse(
+        request_id=request_id,
+        answer=result.answer.answer,
+        citations=_to_response_citations(result),
+        tool_used=ToolUsed.NONE if not chunks else ToolUsed.DOCS,
+        abstained=result.answer.abstained,
+        latency_ms=elapsed_ms,
     )
+    return JSONResponse(status_code=status.HTTP_200_OK, content=response.model_dump())

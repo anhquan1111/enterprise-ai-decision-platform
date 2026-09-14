@@ -64,4 +64,5 @@ pythonpath = ["."]
 timeout = 30
 markers = [
     "integration: needs a running PostgreSQL (skipped by default in CI lint job)",
+    "live_llm: calls the real Gemini API and spends real quota (never run in CI)",
 ]

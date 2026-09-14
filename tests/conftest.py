@@ -7,13 +7,15 @@ Không có nó thì kết quả test phụ thuộc vào việc máy đó có `.e
 output, và output đó đi vào log CI.
 """
 
+from collections.abc import Generator
+
 import pytest
 
 from src.config import Settings, get_settings
 
 
 @pytest.fixture(autouse=True)
-def isolate_settings_from_local_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def isolate_settings_from_local_env(monkeypatch: pytest.MonkeyPatch) -> Generator[None]:
     """Ngắt Settings khỏi file .env trong suốt test.
 
     autouse nên áp cho mọi test, kể cả test viết sau này — người viết không phải nhớ.
