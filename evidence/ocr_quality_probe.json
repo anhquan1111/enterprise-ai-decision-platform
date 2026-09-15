@@ -1,0 +1,10 @@
+{
+  "sample": "policy_scan_sample.pdf",
+  "ground_truth_chars": 527,
+  "extracted_chars": 527,
+  "cer": 0.0095,
+  "wer": 0.0,
+  "latency_s": 8.27,
+  "ground_truth": "CONG TY TNHH VI DU - SO TAY CHINH SACH NOI BO\n\nQuy dinh nghi phep\n\nNhan vien chinh thuc duoc 12 ngay phep co luong moi nam. Phep duoc tinh theo\nnam duong lich. Ngay phep khong dung het trong nam khong duoc chuyen sang nam\nsau va khong duoc quy doi thanh tien.\n\nHan muc phe duyet chi\n\nNhan vien duoc de xuat chi toi 5 trieu dong cho chi phi van hanh thong thuong.\nTruong phong phe duyet de xuat chi toi 50 trieu dong trong pham vi ngan sach\nphong. Khoan chi tren 50 trieu dong phai do Giam doc phe duyet va co bien ban\nkem theo.",
+  "extracted": "CONG TY TNHH VI DU - SO TAY CHINH SACH NOI BO\n\nQuy dinh nghi phep\n\nNhan vien chinh thuc duoc 12 ngay phep co luong moi nam. Phep duoc tinh theo nam duong lich. Ngay phep khong dung het trong nam khong duoc chuyen sang nam sau va khong duoc quy doi thanh tien.\n\nHan muc phe duyet chi\n\nNhan vien duoc de xuat chi toi 5 trieu dong cho chi phi van hanh thong thuong. Truong phong phe duyet de xuat chi toi 50 trieu dong trong pham vi ngan sach phong. Khoan chi tren 50 trieu dong phai do Giam doc phe duyet va co bien ban kem theo."
+}
