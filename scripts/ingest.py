@@ -107,7 +107,16 @@ def write_batch(
                     effective_to = EXCLUDED.effective_to,
                     source_hash = EXCLUDED.source_hash,
                     contract_version = EXCLUDED.contract_version,
-                    ingested_at = EXCLUDED.ingested_at
+                    ingested_at = EXCLUDED.ingested_at,
+                    -- Noi dung doi thi vector cu khong con dung nghia voi no nua -
+                    -- dat lai NULL de scripts/backfill_embeddings.py biet phai embed
+                    -- lai. Khong reset moi lan (kha ton) - chi khi chunk_text THAT SU
+                    -- doi, so bang gia tri da co trong bang, khong phai gia tri moi.
+                    embedding = CASE
+                        WHEN doc_chunks.chunk_text IS DISTINCT FROM EXCLUDED.chunk_text
+                        THEN NULL
+                        ELSE doc_chunks.embedding
+                    END
                 RETURNING (xmax = 0) AS was_insert
                 """,
                 {

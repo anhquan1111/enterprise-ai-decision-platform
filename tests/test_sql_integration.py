@@ -197,3 +197,67 @@ def test_every_quarantined_row_has_a_reason() -> None:
     )
 
     assert rows == []
+
+
+_UPSERT_SQL = """
+    INSERT INTO doc_chunks (
+        doc_id, chunk_index, department, access_level, title, chunk_text,
+        published_at, available_at, effective_from, effective_to,
+        source_file, source_hash, contract_version, ingested_at
+    ) VALUES (
+        %(doc_id)s, 0, 'hr', 'employee', 'test', %(chunk_text)s,
+        now(), now(), '2026-01-01', NULL,
+        'test.csv', 'testhash', 'v1', now()
+    )
+    ON CONFLICT (doc_id, chunk_index) DO UPDATE SET
+        chunk_text = EXCLUDED.chunk_text,
+        ingested_at = EXCLUDED.ingested_at,
+        embedding = CASE
+            WHEN doc_chunks.chunk_text IS DISTINCT FROM EXCLUDED.chunk_text
+            THEN NULL
+            ELSE doc_chunks.embedding
+        END
+"""
+
+
+def test_reingest_invalidates_embedding_only_when_text_actually_changes() -> None:
+    """scripts/ingest.py: đổi chunk_text mà không reset embedding thì retrieval xếp
+    hạng theo vector của văn bản CŨ trong khi trả về trích dẫn của văn bản MỚI — hai
+    thứ không còn khớp nhau. Vá bằng CASE trong ON CONFLICT DO UPDATE; test này khoá
+    lại đúng hành vi đó bằng một doc_id giả lập, không đụng corpus thật."""
+    doc_id = "TEST-EMBED-INVALIDATION"
+    try:
+        with get_connection(read_only=False) as conn, conn.cursor() as cur:
+            cur.execute(_UPSERT_SQL, {"doc_id": doc_id, "chunk_text": "van ban goc"})
+            cur.execute(
+                "UPDATE doc_chunks SET embedding = array_fill(0.1, ARRAY[384])::vector "
+                "WHERE doc_id = %(doc_id)s AND chunk_index = 0",
+                {"doc_id": doc_id},
+            )
+            conn.commit()
+
+        # Ingest lại với ĐÚNG văn bản cũ — embedding phải được giữ nguyên.
+        with get_connection(read_only=False) as conn, conn.cursor() as cur:
+            cur.execute(_UPSERT_SQL, {"doc_id": doc_id, "chunk_text": "van ban goc"})
+            conn.commit()
+        row = fetch_one(
+            "SELECT embedding IS NOT NULL AS has_embedding FROM doc_chunks "
+            "WHERE doc_id = %(doc_id)s AND chunk_index = 0",
+            {"doc_id": doc_id},
+        )
+        assert row is not None and row["has_embedding"] is True
+
+        # Ingest lại với văn bản KHÁC — embedding phải bị reset về NULL.
+        with get_connection(read_only=False) as conn, conn.cursor() as cur:
+            cur.execute(_UPSERT_SQL, {"doc_id": doc_id, "chunk_text": "van ban da doi"})
+            conn.commit()
+        row = fetch_one(
+            "SELECT embedding IS NOT NULL AS has_embedding FROM doc_chunks "
+            "WHERE doc_id = %(doc_id)s AND chunk_index = 0",
+            {"doc_id": doc_id},
+        )
+        assert row is not None and row["has_embedding"] is False
+    finally:
+        with get_connection(read_only=False) as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM doc_chunks WHERE doc_id = %(doc_id)s", {"doc_id": doc_id})
+            conn.commit()

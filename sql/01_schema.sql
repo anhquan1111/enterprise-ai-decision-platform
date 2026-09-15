@@ -76,7 +76,8 @@ CREATE TABLE doc_chunks (
     -- lặng lẽ đi vào mọi phép so sánh.
     effective_to      DATE,
 
-    -- Lấp ở D2. Cho phép NULL để D1 ingest được trước khi chọn embedding model.
+    -- Lấp ở giai đoạn retrieval nền tảng. Cho phép NULL để ingest được ngay từ tầng
+    -- dữ liệu, trước khi chọn embedding model.
     embedding         vector(384),
 
     -- Lineage tối thiểu: đủ trả lời "dòng này từ đâu, theo contract nào, lúc nào".
