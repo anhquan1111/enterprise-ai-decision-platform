@@ -372,11 +372,36 @@ in every row):
 | Sum, 10 completed requests | 6,189 tokens |
 | Mean per request | 618.9 tokens |
 
-**Not converted to a VND/USD figure.** Google AI Studio does not expose a
-pricing-lookup API, and writing a fixed per-token rate into this report risks it
-going stale silently. Convert `mean tokens/request × <current published rate for
-gemini-3.1-flash-lite>` at the public pricing page, dated to when you read it,
-instead of trusting a number frozen here.
+**Converted to VND/USD (15/09/2026, see ADR-023).** `audit_log.total_tokens` stores
+only the combined `usageMetadata.totalTokenCount` — Gemini's response also reports
+`promptTokenCount` (input) and `candidatesTokenCount` (output) separately, and the
+two are priced very differently, but this project never captured that split (a real
+gap, not fixed in this pass — see "Known gap" below). Without it, the honest number
+is a **range**, not a point estimate: actual cost sits somewhere between "every
+token billed at the input rate" and "every token billed at the output rate."
+
+Pricing, standard tier, `gemini-3.1-flash-lite`
+([ai.google.dev/gemini-api/docs/pricing](https://ai.google.dev/gemini-api/docs/pricing),
+read 15/09/2026): **$0.25 / 1M input tokens** (text), **$1.50 / 1M output tokens**.
+Exchange rate ([xe.com](https://www.xe.com/en-us/currencyconverter/convert/?Amount=1&From=USD&To=VND),
+read 15/09/2026 09:32 UTC): **1 USD = 25,981.41 VND**.
+
+| | Lower bound (all tokens at input rate) | Upper bound (all tokens at output rate) |
+|---|---:|---:|
+| This run — 6,189 tokens, 10 completed requests | $0.0015 (~40 VND) | $0.0093 (~241 VND) |
+| Per 1,000 requests, at this run's mean (618.9 tokens/request) | $0.155 (~4,020 VND) | $0.928 (~24,120 VND) |
+
+A real request here skews toward input tokens — system prompt plus retrieved chunks
+stuffed into context, versus a short structured JSON answer coming back — so the
+true figure is expected to sit closer to the lower bound than the upper one. That is
+a reasonable expectation from how the prompt is built, **not a measured fact**; the
+gap below is what would turn it into one.
+
+**Known gap:** `audit_log` and `AuditEntry` (`src/audit.py`) would need a second
+column for `promptTokenCount`/`candidatesTokenCount` (or store both instead of the
+sum) to replace this range with an exact figure — not implemented in this pass,
+consistent with the "don't re-score the sealed held-out set to fix a reporting gap"
+rule; this is pricing math on numbers already measured, not a new run.
 
 ### Three real findings, left as findings — not patched and re-run
 

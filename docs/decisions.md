@@ -972,7 +972,49 @@ một tập held-out **mới gồm 12 câu**, có dấu, tránh trùng lặp v�
 mới lẫn `eval/final.jsonl` cũ, chạy một lần qua HTTP thật — xem ADR kế tiếp khi tập
 đó được viết.
 
-**`sql/02_seed.sql` và system prompt chưa đổi ở ADR này.** Tên nhân viên trong seed
-data và `SYSTEM_INSTRUCTION` trong `src/generation.py`/`src/agent/router.py` vẫn
-không dấu — rủi ro thấp (không ảnh hưởng metric đã đo), để dành cho một lượt dọn dẹp
-riêng nếu cần, không trộn vào ADR này để giữ phạm vi thay đổi rõ ràng.
+**`sql/02_seed.sql` và system prompt cũng được chuyển sang có dấu, trong cùng đợt
+này.** Tên nhân viên/phòng ban trong seed data (ví dụ "Nguyen Van A" → "Nguyễn Văn
+A", "Khoi Kinh doanh" → "Khối Kinh doanh") và `SYSTEM_INSTRUCTION` trong
+`src/generation.py`/`src/agent/router.py` không có test nào hardcode nội dung cũ
+(đã kiểm bằng grep trước khi sửa), nên rủi ro thấp; đổi luôn cho nhất quán thay vì
+để dành một lượt dọn dẹp riêng.
+
+## ADR-023 — Chi phí token quy đổi VNĐ/USD: một khoảng, không phải một con số
+
+**Ngày:** báo cáo cuối (bổ sung) · **Trạng thái:** accepted
+
+**Bối cảnh.** ADR-018 ghi rõ đây là việc chưa đo được tại thời điểm đó: "báo cáo
+cuối quy đổi VNĐ sẽ trích dẫn trang giá công khai kèm ngày truy cập thay vì bịa một
+con số cố định có thể đã lỗi thời." `docs/report.md` (mục "Token cost") đã có số đo
+thật — 6.189 token cộng dồn trên 10/12 câu held-out hoàn thành (2 câu còn lại lỗi hạ
+tầng, không có `total_tokens`) — nhưng chưa quy đổi ra tiền.
+
+**Vấn đề thật, không phải chi tiết vặt: `audit_log.total_tokens` chỉ lưu tổng.**
+Response Gemini trả về `promptTokenCount` (input) và `candidatesTokenCount`
+(output) tách riêng, và hai loại được tính giá khác nhau — nhưng
+`generation.py::_call_gemini`/`router.py::_call_gemini` chỉ từng đọc
+`usageMetadata.totalTokenCount` (xem ADR-018), nên không còn cách nào tách lại sau
+khi đã ghi. Ước lượng tỉ lệ input/output là đoán, đúng loại lỗi `AGENTS.md` mục 4
+cấm.
+
+**Quyết định: báo cáo một khoảng, cận dưới = toàn bộ token tính theo đơn giá input,
+cận trên = toàn bộ token tính theo đơn giá output.** Đây là khoảng đúng về mặt toán
+học (chi phí thật chắc chắn nằm trong đó), khác với việc bịa một tỉ lệ input/output
+"hợp lý" rồi báo một con số điểm có vẻ chính xác nhưng thực ra là đoán.
+
+**Số liệu, tra cứu 15/09/2026:**
+- Đơn giá `gemini-3.1-flash-lite`, tier chuẩn, từ trang giá công khai
+  (ai.google.dev/gemini-api/docs/pricing): $0,25 / 1M token input (text), $1,50 /
+  1M token output.
+- Tỷ giá (xe.com, 09:32 UTC): 1 USD = 25.981,41 VNĐ.
+- Kết quả: 6.189 token của lần chạy held-out = $0,0015–$0,0093 (~40–241 VNĐ). Quy
+  ra 1.000 request ở mức trung bình của lần chạy này (618,9 token/request):
+  $0,155–$0,928 (~4.020–24.120 VNĐ).
+
+**Không làm gì: không chạy lại tập held-out để lấy số chính xác hơn.** Đây là toán
+tiền tệ trên số đã đo, không phải một phép đo mới — chạy lại `eval/final.jsonl` chỉ
+để tách input/output sẽ vi phạm đúng quy tắc ADR-019 đã dựng lên (tập held-out chỉ
+chạy một lần). Muốn có con số chính xác thay vì khoảng, cần một ADR riêng thêm cột
+`prompt_tokens`/`candidates_tokens` vào `audit_log` rồi đo trên một lần chạy MỚI
+(một eval set khác, không phải tập đã niêm phong) — ghi nhận là khoảng trống đã
+biết, không phải điểm mù.
