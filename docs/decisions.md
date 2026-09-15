@@ -417,7 +417,8 @@ của báo cáo cuối, sau khi hybrid retrieval (agent routing) và RBAC/audit 
 tin cậy) đã có — hệ thống hiện tại chưa phải hệ thống cuối cùng. Chạy 5 câu
 `eval/final.jsonl` ngay hôm nay là chạy sớm, và theo đúng quy tắc đã ghi ("nhiễm thì
 không xoá, không giả vờ chưa xem — chuyển thành dev, viết tập cuối mới"): 5 câu đó đã
-đổi tên thành `F0x_seen_at_d2` (giữ nguyên tên lịch sử trong data) và gộp vào
+đổi tên thành `F0x_seen_early` (ban đầu `F0x_seen_at_d2`, đổi lại sau khi dự án bỏ
+nhãn ngày — xem ADR về việc thay D0-D5 bằng tên giai đoạn) và gộp vào
 `eval/dev.jsonl`. `eval/final.jsonl` để trống, chờ báo cáo cuối viết một tập held-out
 mới trên hệ thống thật sự hoàn chỉnh.
 
@@ -903,3 +904,75 @@ phải gọi thẳng Prometheus) trả `sum(ask_requests_total) = 3`. Không suy
 — đổi trước khi để container này chạm mạng ngoài `127.0.0.1`. Dashboard hiện chỉ có
 một trang tổng quan (`ask-overview`), chưa có alerting rule nào — mở khi có nhu cầu
 đo được (ví dụ ngưỡng `503` liên tục).
+
+## ADR-022 — Corpus và `eval/dev.jsonl` chuyển sang tiếng Việt có dấu, đo lại baseline
+
+**Ngày:** 15/09/2026 · **Trạng thái:** accepted
+
+**Bối cảnh.** Corpus (`data/documents.csv`, `data/documents_dirty.csv`) và
+`eval/dev.jsonl` được viết không dấu từ đầu dự án. Lý do ban đầu không hề được ghi
+lại thành ADR nào — không có quyết định nào nói "bỏ dấu để tiết kiệm token". Đây là
+một khoảng trống tài liệu, không phải một đánh đổi đã cân nhắc. Trong khi đó, tiếng
+Việt có dấu là dạng phổ biến trong dữ liệu huấn luyện của các BPE tokenizer, nên
+thường được token hoá gọn hơn tiếng Việt không dấu (không dấu là biến thể hiếm hơn,
+dễ bị tách vụn). Giữ bản không dấu vừa sai chính tả vừa không đúng ngay cả với lý do
+"tiết kiệm token" nếu ai đó dùng nó để biện minh ngược sau này.
+
+**Quyết định.** Viết lại toàn bộ `data/documents.csv` (16 chunk) và
+`data/documents_dirty.csv` (8 dòng vi phạm hợp đồng dữ liệu có chủ đích, giữ nguyên
+từng lỗi) sang tiếng Việt có dấu chuẩn, không đổi `doc_id`/`chunk_index`/
+`department`/`access_level`/các mốc thời gian. `eval/dev.jsonl` viết lại đồng bộ cả
+`question` lẫn `expected_answer_keywords` (25 câu, khớp cách hành văn mới của
+corpus). Hậu tố `F0x_seen_at_d2` đổi thành `F0x_seen_early` nhân dịp này (nhất quán
+với việc dự án đã bỏ nhãn ngày ở khắp nơi khác — xem ADR-010); ba nơi tham chiếu tới
+hậu tố cũ (`AGENTS.md`, ADR-010 ở trên, `docs/report.md`) được cập nhật theo.
+`eval/final.jsonl` (đã niêm phong, đã có kết quả) **không bị đụng vào** — xem
+"Không làm gì" bên dưới.
+
+**Một lỗi thật phát hiện trước khi chạy, không phải sau khi đo sai.** Trước khi
+ingest lại, đọc lại `scripts/ingest.py` phát hiện `ON CONFLICT (doc_id,
+chunk_index) DO UPDATE SET` không hề đụng tới cột `embedding` — nghĩa là re-ingest
+với `chunk_text` mới sẽ để lại vector embedding của văn bản CŨ gắn với chunk có nội
+dung MỚI, làm retrieval xếp hạng theo nghĩa cũ trong khi trích dẫn trả về là câu
+chữ mới. Vá bằng `CASE WHEN doc_chunks.chunk_text IS DISTINCT FROM
+EXCLUDED.chunk_text THEN NULL ELSE doc_chunks.embedding END` — chỉ reset embedding
+khi văn bản thật sự đổi, so bằng giá trị **đã có trong bảng**, không phải giá trị
+mới, để lần re-ingest không có gì thay đổi thì không phải embed lại tốn kém. Có
+test tích hợp riêng (`test_reingest_invalidates_embedding_only_when_text_actually_changes`,
+`tests/test_sql_integration.py`) khoá lại hành vi này bằng một `doc_id` giả lập,
+không đụng corpus thật.
+
+**Quy trình đo lại.** Re-ingest (`uv run python -m scripts.ingest`) → xác nhận cả
+16 chunk có `embedding IS NULL` ngay sau đó (chứng minh patch ở trên hoạt động) →
+re-embed (`uv run python -m scripts.backfill_embeddings`) → chạy lại
+`documents_dirty.csv` để xác nhận hành vi kiểm dịch không đổi (8 dòng vào, 0 được
+nhận, 8 bị cách ly — khớp thiết kế gốc). File bằng chứng cũ
+(`evidence/eval_results_dev.jsonl`, 25 dòng từ lần đo không dấu) được **đổi tên**
+thành `evidence/eval_results_dev_pre_diacritics.jsonl` (và tương ứng cho file
+summary) trước khi chạy lại — không xoá, và không để nguyên tên cũ, vì
+`scripts/run_eval.py` bỏ qua `question_id` đã có trong file kết quả để hỗ trợ chạy
+lại giữa chừng; giữ nguyên tên sẽ khiến 20/25 câu (ID không đổi, nội dung đã đổi
+hoàn toàn) bị bỏ qua và tái sử dụng nhầm điểm số của bản không dấu.
+
+**Kết quả đo lại (15/09/2026, `uv run python -m scripts.run_eval`): giống hệt bản
+gốc về số liệu.** 25/25 câu chạy xong, recall@3/@5/@10 = 18/18 (100%), MRR = 1,000,
+`correct` 18, `access_correct` 5, `no_knowledge_correct` 2, mọi nhóm lỗi = 0. Điều
+này xác nhận việc thêm dấu không phải là thay đổi hành vi hệ thống — nó chỉ sửa một
+lỗi chính tả trong dữ liệu. Ví dụ cosine distance trong `docs/report.md` ("release
+thất bại" xếp hạng 1) được đo lại thật bằng `src/retrieval.retrieve()` trên corpus
+mới: 0,208 (bản không dấu) → 0,2033 (bản có dấu) — chênh lệch nhỏ, thứ hạng không
+đổi.
+
+**Không làm gì: `eval/final.jsonl`.** Đây là tập held-out đã niêm phong, đã chạy
+qua HTTP thật và đã có kết quả trong báo cáo cuối (ADR-019/ADR-020). Sửa nội dung
+của nó — kể cả chỉ để thêm dấu — sẽ làm mất tính "chưa từng thấy" nếu có ai dùng nó
+lại, và phá vỡ đúng nguyên tắc mà ADR-019 dựng lên. Quyết định (đã thống nhất với
+người dùng): giữ nguyên `eval/final.jsonl` và kết quả cũ làm hồ sơ lịch sử, viết
+một tập held-out **mới gồm 12 câu**, có dấu, tránh trùng lặp với cả `eval/dev.jsonl`
+mới lẫn `eval/final.jsonl` cũ, chạy một lần qua HTTP thật — xem ADR kế tiếp khi tập
+đó được viết.
+
+**`sql/02_seed.sql` và system prompt chưa đổi ở ADR này.** Tên nhân viên trong seed
+data và `SYSTEM_INSTRUCTION` trong `src/generation.py`/`src/agent/router.py` vẫn
+không dấu — rủi ro thấp (không ảnh hưởng metric đã đo), để dành cho một lượt dọn dẹp
+riêng nếu cần, không trộn vào ADR này để giữ phạm vi thay đổi rõ ràng.

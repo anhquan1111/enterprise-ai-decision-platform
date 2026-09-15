@@ -6,11 +6,18 @@ is not a final report until the held-out section says so.
 
 ## Retrieval baseline — dense retrieval + structured output, baseline on dev
 
-**Measured:** 13–14/09/2026. **Models:** `gemini-3.1-flash-lite` (generation),
+**Measured:** 13–14/09/2026, **re-measured 15/09/2026** after the corpus and
+`eval/dev.jsonl` were rewritten from non-diacritic to full-diacritic Vietnamese
+(see ADR-022) — same corpus content, same questions, correct spelling. Numbers
+below are the 15/09 re-run; they came back identical to the original run, which
+is itself evidence the diacritics change was a spelling fix, not a behavior
+change. **Models:** `gemini-3.1-flash-lite` (generation),
 `gemini-embedding-001` at 384 dimensions (embeddings), both pinned in `.env`.
 **Reproduce:** `uv run python -m scripts.run_eval --report` (reads results already
 on disk; add `uv run python -m scripts.run_eval` first to regenerate them — this
-calls the real API).
+calls the real API). The pre-diacritics evidence is kept, not deleted, at
+`evidence/eval_results_dev_pre_diacritics.jsonl` /
+`evidence/eval_summary_dev_pre_diacritics.json`.
 
 ### Corpus
 
@@ -52,8 +59,10 @@ with a hand-written TF-IDF baseline. There
 it ranked **5th** — the question describes the situation ("failure"), the answer chunk
 describes the fix ("rollback"), and they share almost no vocabulary. The same kind of
 question against this project's real corpus, using real Gemini embeddings, ranked
-**1st** (cosine distance 0.208). That is the specific weakness dense embeddings are
-expected to fix over lexical search, measured rather than assumed.
+**1st** (cosine distance 0.208 on the original non-diacritic corpus; re-measured at
+0.2033 on the 15/09 diacritic corpus via `src.retrieval.retrieve()` — same rank,
+small distance shift from the re-embedding). That is the specific weakness dense
+embeddings are expected to fix over lexical search, measured rather than assumed.
 
 ### Answer quality and error taxonomy
 
@@ -79,13 +88,20 @@ ngoài"* — is fully correct, but does not contain that exact substring; it say
 "không được dùng", not "không dùng". Fixed by widening the keyword list rather than
 by declaring the model wrong.
 
-**A diacritics bug, caught before any question ran.** `expected_answer_keywords` and
-the corpus are written without Vietnamese diacritics, but Gemini answers with full,
-correct diacritics — the right behaviour for a real user, and the wrong assumption for
-a naive substring match. `khong duoc` is never a substring of `không được` at the byte
-level. `src/eval_taxonomy.py` folds both sides (NFD decomposition, `đ`/`Đ` handled
-separately since they are not decomposable diacritics) before comparing. Without this
-fix, nearly every correct answer in this dataset would have been scored wrong.
+**A diacritics bug, caught before any question ran.** At the time of the 13–14/09
+run, `expected_answer_keywords` and the corpus were written without Vietnamese
+diacritics, but Gemini answers with full, correct diacritics — the right behaviour
+for a real user, and the wrong assumption for a naive substring match. `khong duoc`
+is never a substring of `không được` at the byte level. `src/eval_taxonomy.py` folds
+both sides (NFD decomposition, `đ`/`Đ` handled separately since they are not
+decomposable diacritics) before comparing. Without this fix, nearly every correct
+answer in that run would have been scored wrong.
+
+*Historical note (15/09):* the corpus and `eval/dev.jsonl` were later rewritten to
+full-diacritic Vietnamese (ADR-022), which removes the original cause of this bug —
+but the fold in `src/eval_taxonomy.py` is kept regardless, since it costs nothing
+and makes the comparison robust to any future non-diacritic input rather than
+correct only by construction.
 
 ### A process mistake, corrected in the record rather than hidden
 
@@ -96,9 +112,10 @@ on 14/09 — a genuine process slip, not a deliberate design choice.
 
 Per the rule already recorded for this exact situation: a seen held-out set is not
 deleted and not pretended unseen. It becomes dev data. The 5 questions were renamed
-`F0x_seen_at_d2` (that suffix is a literal `question_id` in `eval/dev.jsonl` — a
-historical record of when it happened, not touched retroactively) and folded into
-`eval/dev.jsonl`, which is why the dev count above is 25 rather than 20.
+`F0x_seen_early` (originally `F0x_seen_at_d2`; renamed once this project dropped
+day-numbered labels project-wide — see the ADR on replacing D0-D5 with named phases)
+and folded into `eval/dev.jsonl`, which is why the dev count above is 25 rather
+than 20.
 `eval/final.jsonl` is empty; the final report layer writes a genuinely new held-out
 set once the system it is meant to evaluate actually exists.
 

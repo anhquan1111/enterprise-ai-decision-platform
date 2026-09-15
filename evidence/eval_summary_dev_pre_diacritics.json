@@ -1,0 +1,16 @@
+{
+  "n_questions": 20,
+  "n_answerable": 15,
+  "n_completed": 20,
+  "recall_at_k": {
+    "recall@3": "15/15 (100.0%)",
+    "recall@5": "15/15 (100.0%)",
+    "recall@10": "15/15 (100.0%)"
+  },
+  "mrr": 1.0,
+  "categories": {
+    "correct": 15,
+    "access_correct": 3,
+    "no_knowledge_correct": 2
+  }
+}
