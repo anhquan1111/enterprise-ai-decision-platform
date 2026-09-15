@@ -61,7 +61,9 @@ uv sync --extra dev --extra eval    # MLflow + BM25 — đã đo và KHÔNG dùn
 
 # Database
 docker compose up -d db             # Chỉ bật PostgreSQL (dev thường ngày)
-docker compose up -d                # Bật cả API trong container (demo)
+docker compose up -d                # Bật cả 4 service (api, db, prometheus, grafana)
+docker compose up -d db api prometheus grafana   # Tương đương, liệt kê rõ
+docker compose build api            # Bắt buộc sau khi sửa src/ — compose up không tự rebuild
 docker compose down                 # Dừng, giữ dữ liệu trong named volume
 docker compose down -v              # Dừng và XÓA dữ liệu
 
@@ -95,7 +97,7 @@ uv run ruff format src/ tests/ scripts/
 uv run mypy src/ scripts/
 ```
 
-**Port đã dùng:** API `8010`, PostgreSQL `5433`. Tránh `8000` (fraud-detection-api) và `5546` (một project SQL khác) vì hai cái đó có thể đang chạy song song.
+**Port đã dùng:** API `8010`, PostgreSQL `5433`, Prometheus `9090`, Grafana `3000`. Tránh `8000` (fraud-detection-api) và `5546` (một project SQL khác) vì hai cái đó có thể đang chạy song song.
 
 ---
 
@@ -232,6 +234,26 @@ Bài học: khi một kết quả qua HTTP khác kết quả gọi hàm trực t
 `Get-NetTCPConnection -LocalPort <port> -State Listen` (PowerShell) rồi đối chiếu
 `StartTime` của process với thời điểm sửa code gần nhất; giết process cũ trước khi
 start lại, không chạy song song nhiều bản.
+
+### `docker compose up` không tự rebuild image `api` khi sửa code
+
+Gặp thật khi dựng Prometheus/Grafana (ADR-021): sửa `src/api.py`, chạy
+`docker compose up -d api`, container start bình thường nhưng `/metrics` trả `404` —
+image `enterprise-ai-api:local` vẫn là bản build cũ, compose không so sánh mã nguồn
+với image đã có sẵn. Phải `docker compose build api` (hoặc `up --build`) sau MỌI lần
+sửa `src/`/`sql/` trước khi `up` lại, không chỉ lần đầu.
+
+### Cổng đã map ra host có thể bị kẹt bởi tiến trình không còn tồn tại
+
+Gặp thật khi dựng Prometheus/Grafana: `Get-NetTCPConnection -LocalPort 8010` báo
+`Listen` bởi một PID mà `Get-Process`/`taskkill`/`Get-CimInstance Win32_Process` đều
+xác nhận **không tồn tại** — sống sót qua cả việc kill tiến trình host, restart Docker
+Desktop, và `wsl --shutdown`. Đây là kẹt cổng ở tầng hệ điều hành/sandbox, không phải
+lỗi cấu hình `compose.yaml`. Xử lý tạm: đổi map cổng host sang một cổng khác
+(`"127.0.0.1:8011:8010"`) chỉ để xác minh pipeline hoạt động — cổng nội bộ trong mạng
+compose (`api:8010`, cái Prometheus thực sự scrape) không đổi theo host port, nên kết
+quả xác minh vẫn hợp lệ cho cấu hình gốc. Đừng đoán "container Running" nghĩa là
+service bên trong đã đúng — kiểm bằng một request thật.
 
 ---
 

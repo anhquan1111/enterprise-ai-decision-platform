@@ -852,3 +852,54 @@ rộng thành cam kết.
 **Không đo lại H07 bằng chính câu hỏi đó** — H07 nằm trong `eval/final.jsonl` đã
 niêm phong; đo bằng câu hỏi mới là cách duy nhất kiểm được prompt mới mà không phá
 tính "held-out" của tập đó.
+
+---
+
+## ADR-021 — Prometheus và Grafana là container riêng, không gộp vào `api`
+
+**Ngày:** phiên sau báo cáo cuối · **Trạng thái:** accepted
+
+**Bối cảnh.** `/metrics` (Prometheus format, `src/metrics.py`) tồn tại từ giai đoạn
+xác thực & độ tin cậy nhưng chưa từng có ai scrape hay hiển thị nó — số liệu sinh ra
+rồi không đi đâu cả. Đây là khoảng trống thật, không phải overengineering.
+
+**Quyết định.** Thêm đúng hai service mới vào `compose.yaml`: `prometheus`
+(`prom/prometheus:v3.0.1`, scrape `api:8010/metrics` mỗi 15s, cấu hình ở
+`docker/prometheus/prometheus.yml`) và `grafana` (`grafana/grafana:11.4.0`,
+datasource + một dashboard `ask-overview` được provision thẳng từ file trong
+`docker/grafana/provisioning/` — không có bước nào phải bấm tay sau khi
+`docker compose up`). Đây là ranh giới container đúng: mỗi thành phần một service
+(stateful `db`, stateless `api`, hai service quan sát riêng `prometheus`/`grafana`),
+khác với việc nhét thêm logic quan sát vào tiến trình `api` — cùng nguyên tắc đã áp
+dụng từ ADR-001 (một Postgres cho ba việc, nhưng KHÔNG có nghĩa gộp mọi service vào
+một tiến trình).
+
+**Không mở rộng thêm.** Cân nhắc tách API thành nhiều service nhỏ hơn (router riêng,
+auth riêng...) — **bị loại**, vì chưa có lý do đo được (không có nhu cầu scale độc
+lập, không có ranh giới bảo mật cần cô lập tiến trình, không có nhiều team sở hữu
+riêng từng phần). Thêm Prometheus/Grafana khác về bản chất: đó là quan sát một hệ
+thống đã có, không phải chia nhỏ chính hệ thống đó — chi phí vận hành thêm (hai
+container nữa) đổi lấy một khoảng trống thật đã tồn tại từ lâu, không phải đổi lấy
+một khả năng chưa ai cần.
+
+**Lỗi mount gặp thật khi dựng.** Mount hai volume riêng biệt lồng vào cùng một path
+(`./docker/grafana/provisioning:/etc/grafana/provisioning:ro` và một mount thứ hai
+vào `/etc/grafana/provisioning/dashboards/files`) — Docker không tạo được mountpoint
+bên trong một bind mount read-only khác:
+`mkdirat ... read-only file system`. Sửa bằng cách đưa file dashboard JSON vào ngay
+trong cây `docker/grafana/provisioning/dashboards/files/`, để một mount duy nhất phủ
+hết, không mount lồng.
+
+**Đo thật, không chỉ tin cấu hình đúng cú pháp.** Gọi 3 request `/ask` thật (401
+thiếu key, 200 câu hỏi docs hợp lệ, 403 giả mạo role) qua container `api` đang chạy,
+đợi một chu kỳ scrape (15s), rồi xác nhận bằng đúng ba lớp: Prometheus `/api/v1/query`
+trả về đúng 3 dòng khớp nhãn `status`/`tool_used` đã gọi; Grafana
+`/api/datasources/proxy/uid/prometheus/...` (đi qua đúng đường dashboard sẽ dùng, không
+phải gọi thẳng Prometheus) trả `sum(ask_requests_total) = 3`. Không suy luận từ
+"container Running" — "Running" không chứng minh scrape có hoạt động, như log
+`lastError: 404` ban đầu đã cho thấy (image `api` cũ chưa build lại code mới nhất).
+
+**Giới hạn đã biết.** `GRAFANA_ADMIN_PASSWORD` mặc định `admin` trong `.env.example`
+— đổi trước khi để container này chạm mạng ngoài `127.0.0.1`. Dashboard hiện chỉ có
+một trang tổng quan (`ask-overview`), chưa có alerting rule nào — mở khi có nhu cầu
+đo được (ví dụ ngưỡng `503` liên tục).

@@ -57,8 +57,15 @@ flowchart TB
     GEN --> VAL["Validator: schema + every claim cited"]
     VAL -->|no evidence| ABS["abstained = true"]
     VAL --> OUT["AskResponse JSON"]
-    OUT --> AUD["Audit log + Prometheus metrics"]
+    OUT --> AUD["Audit log"]
+    OUT --> MET["/metrics exposed"]
+    MET --> PROM[("Prometheus — scrapes api:8010/metrics")]
+    PROM --> GRAF["Grafana — dashboard provisioned from disk"]
 ```
+
+`db`, `api`, `prometheus`, `grafana` are four separate containers (`compose.yaml`) —
+observability is not bolted onto the API process, it is its own service scraping a
+public HTTP endpoint, same as it would run against a real deployment.
 
 Full detail in [`docs/architecture.md`](docs/architecture.md). Design choices and
 the reasoning behind them are recorded in [`docs/decisions.md`](docs/decisions.md).
@@ -134,6 +141,25 @@ uv run pytest tests/ -v -m live_llm                              # calls real Ge
 uv run python -m scripts.run_eval --report                       # baseline numbers, no calls
 ```
 
+## Metrics and dashboards
+
+`/metrics` existed unused for a while — nothing scraped it until Prometheus and
+Grafana were added as their own containers (`compose.yaml`), not bolted onto the API
+process:
+
+```bash
+docker compose up -d db api prometheus grafana
+```
+
+- Prometheus: [http://127.0.0.1:9090](http://127.0.0.1:9090) — `/targets` shows
+  `enterprise-ai-api` as `UP` once the API container is healthy.
+- Grafana: [http://127.0.0.1:3000](http://127.0.0.1:3000) — login `admin`/`admin`
+  (change via `GRAFANA_ADMIN_PASSWORD` in `.env`), dashboard **"Enterprise AI Decision
+  Platform - /ask overview"** is provisioned automatically from
+  `docker/grafana/dashboards/` — nothing to click through by hand. Panels: request
+  rate by status/tool, p50/p95 latency, auth failure rate, all reading the exact
+  three metrics `src/metrics.py` defines.
+
 ## Tech stack
 
 Python 3.12 · FastAPI · PostgreSQL 17 + pgvector 0.8.6 · psycopg 3 (raw SQL, no
@@ -184,6 +210,10 @@ eval/               # dev.jsonl (25 questions, open); final.jsonl (12 questions,
 evidence/           # Raw outputs behind every number quoted here
 docs/               # architecture.md, decisions.md, query_plan.md, report.md, runbook.md,
                     # demo_script.md, cv_bullets.md, reading_order.md
+docker/
+├── prometheus/prometheus.yml          # scrapes api:8010/metrics every 15s
+└── grafana/provisioning/              # datasource + "ask-overview" dashboard,
+                                        # applied on start, nothing to click through
 tests/              # Fast unit tests (mocked); `integration` needs Postgres;
                     # `live_llm` calls real Gemini — neither runs in CI
 ```

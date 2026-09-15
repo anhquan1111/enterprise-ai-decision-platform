@@ -1,5 +1,5 @@
-"""D4: metric Prometheus cho /ask. prometheus-client da la dependency tu D0
-(pyproject.toml), chua tung duoc dung toi bay gio.
+"""Metric Prometheus cho /ask. prometheus-client da la dependency tu dau du an
+(pyproject.toml), chua tung duoc dung toi luc nay.
 
 Dat ten theo dung quy uoc Prometheus: don vi trong ten (`_seconds`, `_total`), counter
 ket thuc bang `_total`. Khong dung label co gia tri khong gioi han (vd raw question

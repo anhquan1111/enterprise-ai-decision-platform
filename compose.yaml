@@ -35,6 +35,9 @@ services:
   # For day-to-day development run uvicorn on the host instead
   # (uv run uvicorn src.api:app --reload --port 8010) and keep only `db` up.
   # This service exists so the whole system starts with one command for the demo.
+  # `prometheus` scrapes this container over the compose network (api:8010), so
+  # if you run uvicorn on the host instead, point docker/prometheus/prometheus.yml
+  # at host.docker.internal:8010 to keep metrics flowing.
   api:
     build:
       context: .
@@ -60,9 +63,47 @@ services:
     networks:
       - platform
 
+  # ── Prometheus ─────────────────────────────────────────────
+  # Scrapes api:8010/metrics — that endpoint existed unused for a while before
+  # anything actually collected it. See docs/decisions.md ADR-021.
+  prometheus:
+    image: prom/prometheus:v3.0.1
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - platform
+
+  # ── Grafana ────────────────────────────────────────────────
+  # Datasource and one dashboard are provisioned from disk (docker/grafana/) —
+  # nothing to click through by hand after `docker compose up`.
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - platform
+
 networks:
   platform:
     name: enterprise-ai-platform
 
 volumes:
   db-data:
+  prometheus-data:
+  grafana-data:
