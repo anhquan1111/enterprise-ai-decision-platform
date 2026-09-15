@@ -25,6 +25,9 @@ dependencies = [
     # không ORM".
     "alembic>=1.13.0",
     "sqlalchemy>=2.0.0",
+    # JWT auth (ADR-028) — chỉ dùng để ký/xác minh HS256, không cần tính năng nào
+    # khác của thư viện.
+    "pyjwt>=2.9.0",
 ]
 
 [project.optional-dependencies]

@@ -1260,3 +1260,51 @@ chứng cụ thể hơn — là đổi `ToolPlan` sang hai trường boolean đ�
 từng điều kiện tách biệt ở tầng schema thay vì tin vào hướng dẫn ngôn ngữ tự nhiên
 — nhưng đây là một thay đổi để dành, không làm trong ADR này vì chưa có lỗi tái
 hiện được để xác nhận nó thật sự cần thiết.
+
+## ADR-028 — JWT, bước 1/3: tiện ích cấp/xác minh, chưa đụng route nào
+
+**Ngày:** sau báo cáo cuối · **Trạng thái:** accepted, bước 1/3
+
+**Bối cảnh.** ADR-015 tự ghi rõ điều kiện nâng cấp: "Nâng cấp lên JWT/OAuth2 khi dự
+án cần thu hồi quyền tức thời hoặc tích hợp một hệ thống định danh doanh nghiệp
+thật." API key hôm nay là xác thực "sở hữu một bí mật" — không có hạn dùng, thu hồi
+chỉ bằng cách xoá `api_key_hash` thủ công. Thêm JWT chia làm 3 bước tách biệt, mỗi
+bước một commit riêng, để không có bước nào làm API key hiện tại ngừng hoạt động
+giữa chừng: (1) tiện ích cấp/xác minh — đúng ADR này; (2) endpoint `/auth/token`
+phát hành token, API key vẫn chạy song song; (3) `authenticate()` chấp nhận cả JWT
+lẫn API key.
+
+**Quyết định, bước 1/3: `src/jwt_auth.py` — `issue_token()`/`verify_token()`, chưa
+route nào gọi tới.** HS256 (đối xứng), không RS256 — chỉ một service vừa cấp vừa
+xác minh, bất đối xứng chỉ có ích khi việc ký và xác minh tách rời giữa nhiều bên,
+thêm vào bây giờ là độ phức tạp chưa cần. Setting mới trong `Settings`:
+`jwt_secret_key` (rỗng mặc định, giống `llm_api_key` — thiếu secret phải lỗi rõ
+ràng lúc dùng, không âm thầm ký bằng giá trị giả đoán trước được), `jwt_algorithm`
+(mặc định `HS256`), `jwt_expiry_minutes` (mặc định 60).
+
+**Phòng vệ "algorithm confusion" — luôn truyền `algorithms=[...]` tường minh khi
+decode.** Đây là lớp tấn công JWT có thật và đã biết: kẻ tấn công tự ký một token
+bằng thuật toán khác thuật toán server mong đợi (ví dụ `none`, hoặc đổi
+RS256↔HS256 nếu server không ép rõ), qua được bước xác minh nếu thư viện tự đoán
+thuật toán từ header của chính token. `verify_token()` luôn truyền
+`algorithms=[settings.jwt_algorithm]`, không bao giờ để PyJWT tự suy luận. Test
+riêng khoá lại: token tự ký bằng HS384 (khác HS256 đã cấu hình) bị từ chối dù chữ
+ký hợp lệ với secret đúng.
+
+**Claims tối thiểu, đánh đổi có chủ ý.** `sub` (employee_id, đúng tên chuẩn JWT
+cho "subject"), `role`/`department` để RBAC đọc thẳng từ token — không tra DB mỗi
+request như API key. Đánh đổi: đổi role/department của một nhân viên sau khi token
+đã phát hành sẽ không phản ánh cho tới khi token đó hết hạn (tối đa
+`jwt_expiry_minutes`). Chấp nhận được ở quy mô hiện tại — nếu cần phản ánh tức
+thời, cần một cơ chế thu hồi riêng (denylist token, không nằm trong phạm vi bước
+này).
+
+**Lỗi nào cũng gộp thành `AuthenticationError`** (hết hạn, sai chữ ký, thiếu
+claim, token hỏng cú pháp) — cùng loại lỗi `authenticate()` (API key) đã trả ra
+hôm nay, để bước 3/3 xử lý thống nhất bất kể xác thực bằng phương thức nào, không
+phải viết hai nhánh lỗi khác nhau ở tầng gọi.
+
+**Test (`tests/test_jwt_auth.py`, 8 ca): round-trip đúng, chữ ký giả bị từ chối,
+hết hạn bị từ chối, ký sai secret bị từ chối, algorithm confusion bị từ chối,
+thiếu claim bị từ chối, thiếu secret cấu hình báo lỗi rõ ràng ở cả issue lẫn
+verify.** 183 test không-integration vẫn xanh sau khi thêm.

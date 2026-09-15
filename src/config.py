@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     # engine không áp đảo danh sách sau khi trộn.
     rrf_k: int = 60
 
+    # ── JWT (bổ sung sau báo cáo cuối) ──────────────────────
+    # Rỗng mặc định, giống llm_api_key: thiếu secret phải lỗi rõ ràng lúc issue/verify,
+    # không phải âm thầm ký bằng một giá trị giả đoán trước được.
+    jwt_secret_key: str = ""
+    jwt_algorithm: str = "HS256"
+    jwt_expiry_minutes: int = 60
+
     @property
     def database_url(self) -> str:
         """Connection string cho psycopg.
