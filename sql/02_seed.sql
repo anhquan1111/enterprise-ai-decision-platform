@@ -10,21 +10,21 @@
 -- liệu đã ingest. Chạy lại file này bao nhiêu lần cũng an toàn.
 
 INSERT INTO departments (department, full_name) VALUES
-    ('sales',       'Khoi Kinh doanh'),
-    ('hr',          'Khoi Nhan su'),
-    ('finance',     'Khoi Tai chinh'),
-    ('engineering', 'Khoi Ky thuat')
+    ('sales',       'Khối Kinh doanh'),
+    ('hr',          'Khối Nhân sự'),
+    ('finance',     'Khối Tài chính'),
+    ('engineering', 'Khối Kỹ thuật')
 ON CONFLICT (department) DO UPDATE SET full_name = EXCLUDED.full_name;
 
 INSERT INTO employees (employee_id, full_name, department, role) VALUES
-    ('emp_001', 'Nguyen Van A', 'sales',       'employee'),
-    ('emp_002', 'Tran Thi B',   'sales',       'manager'),
-    ('emp_003', 'Le Van C',     'finance',     'employee'),
-    ('emp_004', 'Pham Thi D',   'finance',     'manager'),
-    ('emp_005', 'Hoang Van E',  'hr',          'employee'),
-    ('emp_006', 'Vu Thi F',     'engineering', 'employee'),
-    ('emp_007', 'Dang Van G',   'engineering', 'manager'),
-    ('emp_008', 'Bui Thi H',    'finance',     'executive')
+    ('emp_001', 'Nguyễn Văn A', 'sales',       'employee'),
+    ('emp_002', 'Trần Thị B',   'sales',       'manager'),
+    ('emp_003', 'Lê Văn C',     'finance',     'employee'),
+    ('emp_004', 'Phạm Thị D',   'finance',     'manager'),
+    ('emp_005', 'Hoàng Văn E',  'hr',          'employee'),
+    ('emp_006', 'Vũ Thị F',     'engineering', 'employee'),
+    ('emp_007', 'Đặng Văn G',   'engineering', 'manager'),
+    ('emp_008', 'Bùi Thị H',    'finance',     'executive')
 ON CONFLICT (employee_id) DO UPDATE SET
     full_name  = EXCLUDED.full_name,
     department = EXCLUDED.department,

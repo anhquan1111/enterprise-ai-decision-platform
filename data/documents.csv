@@ -1,17 +1,17 @@
 doc_id,chunk_index,department,access_level,title,chunk_text,published_at,available_at,effective_from,effective_to
-HR-001,0,hr,employee,Quy dinh nghi phep,Nhan vien chinh thuc duoc 12 ngay phep co luong moi nam. Phep duoc tinh theo nam duong lich.,2026-01-10 09:00:00+00,2026-01-10 10:00:00+00,2026-01-01,
-HR-001,1,hr,employee,Quy dinh nghi phep,Ngay phep khong dung het trong nam khong duoc chuyen sang nam sau va khong duoc quy doi thanh tien.,2026-01-10 09:00:00+00,2026-01-10 10:00:00+00,2026-01-01,
-HR-002,0,hr,manager,Quy trinh tuyen dung,Truong phong duoc mo tuyen dung khi co ngan sach headcount da duyet trong ke hoach nam.,2026-02-01 08:00:00+00,2026-02-01 08:30:00+00,2026-02-01,
-HR-002,1,hr,manager,Quy trinh tuyen dung,Moi ung vien phai qua it nhat hai vong phong van ky thuat truoc khi nhan offer.,2026-02-01 08:00:00+00,2026-02-01 08:30:00+00,2026-02-01,
-FIN-014,0,finance,employee,Han muc phe duyet chi,Nhan vien duoc de xuat chi toi 5 trieu dong cho chi phi van hanh thong thuong.,2026-02-03 08:30:00+00,2026-02-03 09:00:00+00,2026-02-01,
-FIN-014,1,finance,manager,Han muc phe duyet chi,Truong phong phe duyet de xuat chi toi 50 trieu dong trong pham vi ngan sach phong.,2026-02-03 08:30:00+00,2026-02-03 09:00:00+00,2026-02-01,
-FIN-014,2,finance,executive,Han muc phe duyet chi,Khoan chi tren 50 trieu dong phai do Giam doc phe duyet va co bien ban kem theo.,2026-02-03 08:30:00+00,2026-02-03 09:00:00+00,2026-02-01,
-FIN-020,0,finance,manager,Quy trinh chot so thang,So doanh thu thang duoc chot vao ngay lam viec thu nam cua thang tiep theo.,2026-03-01 09:00:00+00,2026-03-01 09:30:00+00,2026-03-01,
-FIN-020,1,finance,manager,Quy trinh chot so thang,Truoc khi chot so duoc danh dau la tam tinh va khong dung de bao cao ra ben ngoai.,2026-03-01 09:00:00+00,2026-03-01 09:30:00+00,2026-03-01,
-ENG-007,0,engineering,employee,Quy trinh release,Moi release phai qua code review va pipeline CI xanh truoc khi len production.,2026-03-15 11:00:00+00,2026-03-15 11:20:00+00,2026-03-15,
-ENG-007,1,engineering,employee,Quy trinh release,Release that bai phai rollback ve image truoc do trong vong 15 phut va ghi lai su co.,2026-03-15 11:00:00+00,2026-03-15 11:20:00+00,2026-03-15,
-ENG-012,0,engineering,manager,Quy dinh truy cap du lieu,Quyen truy cap du lieu khach hang chi cap theo du an va phai thu hoi khi du an ket thuc.,2026-04-10 10:00:00+00,2026-04-10 10:30:00+00,2026-04-10,
-SAL-002,0,sales,employee,Chinh sach giam gia,Nhan vien kinh doanh duoc giam gia toi 10 phan tram ma khong can duyet them.,2026-01-20 14:00:00+00,2026-01-20 14:30:00+00,2026-02-01,2026-06-30
-SAL-002,1,sales,manager,Chinh sach giam gia,Giam gia tu 10 den 25 phan tram phai co phe duyet cua truong phong kinh doanh.,2026-01-20 14:00:00+00,2026-01-20 14:30:00+00,2026-02-01,2026-06-30
-SAL-009,0,sales,employee,Chinh sach giam gia 2026 H2,Tu thang 7 nam 2026 muc giam gia tu do giam con 8 phan tram cho moi nhan vien.,2026-06-25 09:00:00+00,2026-06-25 09:30:00+00,2026-07-01,
-SAL-011,0,sales,executive,Ke hoach mo rong thi truong,Ke hoach mo rong sang thi truong Nhat Ban trong nua dau 2027 va ngan sach du kien.,2026-05-05 09:00:00+00,2026-05-05 09:30:00+00,2026-05-05,
+HR-001,0,hr,employee,Quy định nghỉ phép,Nhân viên chính thức được 12 ngày phép có lương mỗi năm. Phép được tính theo năm dương lịch.,2026-01-10 09:00:00+00,2026-01-10 10:00:00+00,2026-01-01,
+HR-001,1,hr,employee,Quy định nghỉ phép,Ngày phép không dùng hết trong năm không được chuyển sang năm sau và không được quy đổi thành tiền.,2026-01-10 09:00:00+00,2026-01-10 10:00:00+00,2026-01-01,
+HR-002,0,hr,manager,Quy trình tuyển dụng,Trưởng phòng được mở tuyển dụng khi có ngân sách headcount đã duyệt trong kế hoạch năm.,2026-02-01 08:00:00+00,2026-02-01 08:30:00+00,2026-02-01,
+HR-002,1,hr,manager,Quy trình tuyển dụng,Mọi ứng viên phải qua ít nhất hai vòng phỏng vấn kỹ thuật trước khi nhận offer.,2026-02-01 08:00:00+00,2026-02-01 08:30:00+00,2026-02-01,
+FIN-014,0,finance,employee,Hạn mức phê duyệt chi,Nhân viên được đề xuất chi tới 5 triệu đồng cho chi phí vận hành thông thường.,2026-02-03 08:30:00+00,2026-02-03 09:00:00+00,2026-02-01,
+FIN-014,1,finance,manager,Hạn mức phê duyệt chi,Trưởng phòng phê duyệt đề xuất chi tới 50 triệu đồng trong phạm vi ngân sách phòng.,2026-02-03 08:30:00+00,2026-02-03 09:00:00+00,2026-02-01,
+FIN-014,2,finance,executive,Hạn mức phê duyệt chi,Khoản chi trên 50 triệu đồng phải do Giám đốc phê duyệt và có biên bản kèm theo.,2026-02-03 08:30:00+00,2026-02-03 09:00:00+00,2026-02-01,
+FIN-020,0,finance,manager,Quy trình chốt sổ tháng,Số doanh thu tháng được chốt vào ngày làm việc thứ năm của tháng tiếp theo.,2026-03-01 09:00:00+00,2026-03-01 09:30:00+00,2026-03-01,
+FIN-020,1,finance,manager,Quy trình chốt sổ tháng,Trước khi chốt số được đánh dấu là tạm tính và không dùng để báo cáo ra bên ngoài.,2026-03-01 09:00:00+00,2026-03-01 09:30:00+00,2026-03-01,
+ENG-007,0,engineering,employee,Quy trình release,Mọi release phải qua code review và pipeline CI xanh trước khi lên production.,2026-03-15 11:00:00+00,2026-03-15 11:20:00+00,2026-03-15,
+ENG-007,1,engineering,employee,Quy trình release,Release thất bại phải rollback về image trước đó trong vòng 15 phút và ghi lại sự cố.,2026-03-15 11:00:00+00,2026-03-15 11:20:00+00,2026-03-15,
+ENG-012,0,engineering,manager,Quy định truy cập dữ liệu,Quyền truy cập dữ liệu khách hàng chỉ cấp theo dự án và phải thu hồi khi dự án kết thúc.,2026-04-10 10:00:00+00,2026-04-10 10:30:00+00,2026-04-10,
+SAL-002,0,sales,employee,Chính sách giảm giá,Nhân viên kinh doanh được giảm giá tới 10 phần trăm mà không cần duyệt thêm.,2026-01-20 14:00:00+00,2026-01-20 14:30:00+00,2026-02-01,2026-06-30
+SAL-002,1,sales,manager,Chính sách giảm giá,Giảm giá từ 10 đến 25 phần trăm phải có phê duyệt của trưởng phòng kinh doanh.,2026-01-20 14:00:00+00,2026-01-20 14:30:00+00,2026-02-01,2026-06-30
+SAL-009,0,sales,employee,Chính sách giảm giá 2026 H2,Từ tháng 7 năm 2026 mức giảm giá tự do giảm còn 8 phần trăm cho mọi nhân viên.,2026-06-25 09:00:00+00,2026-06-25 09:30:00+00,2026-07-01,
+SAL-011,0,sales,executive,Kế hoạch mở rộng thị trường,Kế hoạch mở rộng sang thị trường Nhật Bản trong nửa đầu 2027 và ngân sách dự kiến.,2026-05-05 09:00:00+00,2026-05-05 09:30:00+00,2026-05-05,

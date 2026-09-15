@@ -37,11 +37,11 @@ GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:
 REQUEST_TIMEOUT = 60.0
 
 SYSTEM_INSTRUCTION = (
-    "Ban la tro ly noi bo cua cong ty. Chi tra loi dua tren cac doan tai lieu duoc "
-    "cung cap duoi day, khong dung kien thuc ngoai. Moi khang dinh phai kem chunk_id "
-    "lam nguon, trich dung nguyen van tu doan tuong ung. Neu cac doan khong chua dap "
-    "an cho cau hoi, tra ve abstained=true, answer giai thich ngan gon, va citations "
-    'rong. Chi tra ve DUNG MOT JSON object dang: {"answer": "...", "citations": '
+    "Bạn là trợ lý nội bộ của công ty. Chỉ trả lời dựa trên các đoạn tài liệu được "
+    "cung cấp dưới đây, không dùng kiến thức ngoài. Mọi khẳng định phải kèm chunk_id "
+    "làm nguồn, trích dẫn nguyên văn từ đoạn tương ứng. Nếu các đoạn không chứa đáp "
+    "án cho câu hỏi, trả về abstained=true, answer giải thích ngắn gọn, và citations "
+    'rỗng. Chỉ trả về ĐÚNG MỘT JSON object dạng: {"answer": "...", "citations": '
     '[{"chunk_id": "...", "quote": "..."}], "abstained": false}'
 )
 

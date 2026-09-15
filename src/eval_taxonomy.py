@@ -15,10 +15,12 @@ from src.generation import Answer
 def _fold(text: str) -> str:
     """Chuẩn hóa để so từ khóa không phân biệt dấu tiếng Việt.
 
-    Corpus và rubric trong dự án này viết không dấu (theo quy ước từ Ngày 7/D1), nhưng
-    Gemini trả lời bằng tiếng Việt có dấu đầy đủ và đúng chính tả — hành vi đúng cho
-    người dùng thật. So khớp trực tiếp sẽ không bao giờ khớp: "khong duoc" không phải
-    chuỗi con của "không được" theo byte. Bỏ dấu cả hai phía trước khi so.
+    Corpus và rubric ban đầu viết không dấu, còn Gemini luôn trả lời bằng tiếng Việt
+    có dấu đầy đủ và đúng chính tả — hành vi đúng cho người dùng thật nhưng khiến so
+    khớp trực tiếp không bao giờ khớp ("khong duoc" không phải chuỗi con của "không
+    được" theo byte). Corpus và rubric đã chuyển sang có dấu (ADR-022), nên nguyên
+    nhân gốc không còn, nhưng vẫn giữ hàm này: chi phí bằng không, và giúp so khớp
+    không phụ thuộc vào việc dữ liệu đầu vào có dấu hay không.
 
     NFD tách dấu phụ khỏi nguyên âm gốc (ví dụ "ư" thành "u" + dấu), nhưng "đ" là một
     chữ cái Latin riêng (U+0111), không phải tổ hợp — phải thay tay trước khi NFD.

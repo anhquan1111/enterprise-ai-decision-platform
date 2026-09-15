@@ -296,9 +296,9 @@ Kiểm codebase hiện tại rồi bắt đầu.
 
 Kết quả thật khác kế hoạch ở một chỗ đáng ghi: chỉ 25 câu (không phải 40), và
 `eval/final.jsonl` **để trống** — 5 câu held-out ban đầu bị chạy sớm (lỗi quy
-trình, xem ADR-010), đã gộp vào dev với hậu tố `_seen_at_d2` (giữ nguyên tên gốc
-trong data, không đổi tên lịch sử). Báo cáo cuối cần viết một tập held-out mới,
-sau khi agent routing và xác thực đều xong.
+trình, xem ADR-010), đã gộp vào dev với hậu tố `_seen_early` (ban đầu đặt tên
+`_seen_at_d2`, đổi lại khi bỏ nhãn ngày khỏi toàn bộ dự án). Báo cáo cuối cần viết
+một tập held-out mới, sau khi agent routing và xác thực đều xong.
 
 **Agent routing (hoàn thành 14/09/2026):**
 
