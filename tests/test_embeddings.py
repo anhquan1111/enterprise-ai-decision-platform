@@ -65,3 +65,60 @@ def test_embed_sends_task_type_in_request_body(monkeypatch: pytest.MonkeyPatch) 
     body = captured["json"]
     assert isinstance(body, dict)
     assert body["taskType"] == "RETRIEVAL_QUERY"
+
+
+def test_embed_retries_after_transient_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Giai đoạn báo cáo cuối (ADR-024): phát hiện thật khi chạy held-out v2 — một lần
+    503 thoáng qua từ gemini-embedding-001 trước đây làm chết hẳn mọi câu hỏi cần docs
+    retrieval, trong khi generation.py/router.py đã có retry từ lâu. Test này khoá lại
+    hành vi retry mới, cùng mẫu với test_generation.py."""
+    dim = get_settings().embedding_dim
+    monkeypatch.setattr("src.embeddings._NETWORK_RETRY_BACKOFF_S", 0.0)
+    responses: list[httpx.Response] = [
+        httpx.Response(503, request=httpx.Request("POST", "https://example.test"), json={}),
+        fake_response([0.1] * dim),
+    ]
+
+    def fake_post(url: str, **kwargs: object) -> httpx.Response:
+        return responses.pop(0)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    result = embed("cau hoi", task_type="RETRIEVAL_QUERY")
+
+    assert len(result) == dim
+
+
+def test_embed_raises_after_retries_exhausted_on_persistent_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("src.embeddings._NETWORK_RETRY_BACKOFF_S", 0.0)
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *a, **kw: httpx.Response(
+            503, request=httpx.Request("POST", "https://example.test"), json={}
+        ),
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        embed("cau hoi", task_type="RETRIEVAL_QUERY")
+
+
+def test_embed_retries_after_real_network_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    dim = get_settings().embedding_dim
+    monkeypatch.setattr("src.embeddings._NETWORK_RETRY_BACKOFF_S", 0.0)
+    responses: list[object] = [httpx.TimeoutException("het gio"), fake_response([0.1] * dim)]
+
+    def fake_post(url: str, **kwargs: object) -> httpx.Response:
+        item = responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        assert isinstance(item, httpx.Response)
+        return item
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    result = embed("cau hoi", task_type="RETRIEVAL_QUERY")
+
+    assert len(result) == dim

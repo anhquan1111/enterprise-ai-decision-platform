@@ -6,6 +6,8 @@ khác nhau — cosine similarity vẫn ra số, nhưng con số đó vô nghĩa.
 train/serve skew đã nói ở Ngày 7 file 1 mục 5, áp cho embedding.
 """
 
+import random
+import time
 from typing import Literal
 
 import httpx
@@ -17,6 +19,19 @@ EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:emb
 # Timeout cho mỗi lần gọi. Không đặt thì theo đúng ADR-005: một request treo sẽ chờ vô
 # hạn thay vì báo lỗi.
 REQUEST_TIMEOUT = 30.0
+
+# Giai đoạn báo cáo cuối (ADR-024): retry/backoff/jitter y hệt generation.py và
+# router.py — gap thật phát hiện khi chạy held-out v2: embeddings.py trước đây không
+# hề retry, và agent/loop.py's _retry() chỉ bắt lỗi mạng (ConnectError/Timeout), không
+# bắt HTTPStatusError, nên MỌI câu hỏi cần docs retrieval chỉ cần một lần 503 thoáng
+# qua từ gemini-embedding-001 là chết hẳn, trong khi câu hỏi sql-only (không gọi
+# embedding) vẫn qua bình thường cùng lúc đó — bất đối xứng độ tin cậy không có lý do
+# chính đáng nào giữa hai đường LLM call.
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+_NETWORK_RETRY_ATTEMPTS = 3
+_NETWORK_RETRY_BACKOFF_S = 1.0
+_NETWORK_RETRY_JITTER_S = 0.5
+_NETWORK_LEVEL_RETRYABLE = (httpx.ConnectError, httpx.TimeoutException)
 
 TaskType = Literal["RETRIEVAL_DOCUMENT", "RETRIEVAL_QUERY"]
 
@@ -34,17 +49,44 @@ def embed(text: str, *, task_type: TaskType) -> list[float]:
     if not settings.llm_api_key:
         raise RuntimeError("LLM_API_KEY rỗng — không thể gọi Gemini. Kiểm tra .env.")
 
-    response = httpx.post(
-        EMBED_URL.format(model=settings.embedding_model),
-        headers={"x-goog-api-key": settings.llm_api_key, "Content-Type": "application/json"},
-        timeout=REQUEST_TIMEOUT,
-        json={
-            "content": {"parts": [{"text": text}]},
-            "taskType": task_type,
-            "outputDimensionality": settings.embedding_dim,
-        },
-    )
-    response.raise_for_status()
+    payload = {
+        "content": {"parts": [{"text": text}]},
+        "taskType": task_type,
+        "outputDimensionality": settings.embedding_dim,
+    }
+
+    last_exc: Exception | None = None
+    response: httpx.Response | None = None
+    for attempt in range(_NETWORK_RETRY_ATTEMPTS):
+        try:
+            response = httpx.post(
+                EMBED_URL.format(model=settings.embedding_model),
+                headers={
+                    "x-goog-api-key": settings.llm_api_key,
+                    "Content-Type": "application/json",
+                },
+                timeout=REQUEST_TIMEOUT,
+                json=payload,
+            )
+        except _NETWORK_LEVEL_RETRYABLE as exc:
+            last_exc = exc
+            response = None
+        else:
+            if response.status_code not in _RETRYABLE_STATUS:
+                response.raise_for_status()
+                break
+            last_exc = httpx.HTTPStatusError(
+                f"{response.status_code} tạm thời", request=response.request, response=response
+            )
+        if attempt < _NETWORK_RETRY_ATTEMPTS - 1:
+            time.sleep(
+                _NETWORK_RETRY_BACKOFF_S * (2**attempt) + random.uniform(0, _NETWORK_RETRY_JITTER_S)
+            )
+    else:
+        assert last_exc is not None
+        raise last_exc
+
+    assert response is not None
     values: list[float] = response.json()["embedding"]["values"]
 
     if len(values) != settings.embedding_dim:

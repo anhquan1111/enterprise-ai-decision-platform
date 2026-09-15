@@ -21,6 +21,7 @@ phong lại một tập held-out MỚI, ví dụ sau khi eval/final.jsonl đư�
 import json
 import statistics
 import sys
+import time
 import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,6 +33,15 @@ from src.db import fetch_all
 
 EVAL_DIR = Path(__file__).parent.parent / "eval"
 EVIDENCE_DIR = Path(__file__).parent.parent / "evidence"
+
+# Rải nhẹ giữa các câu, cùng lý do với run_eval.py's SLEEP_BETWEEN_QUESTIONS_S —
+# script này trước đây KHÔNG có khoảng nghỉ nào, và mỗi câu ở đây có thể tốn tới 2
+# lượt gọi LLM thật (router + generation nếu dùng docs), gấp đôi run_eval.py's 1 lượt
+# cho mỗi câu dev. Phát hiện thật: một lần chạy không nghỉ dồn 12 câu liên tiếp (24+
+# lượt gọi kể cả retry) vào Gemini gặp toàn bộ 503 "high demand" — không rõ là do
+# Gemini quá tải thật hay do chính request pattern của script này dồn dập, nhưng
+# nghỉ giữa các câu là chi phí rẻ để loại trừ nguyên nhân thứ hai.
+SLEEP_BETWEEN_QUESTIONS_S = 2.0
 GOLD_PATH = EVAL_DIR / "final.jsonl"
 RESULTS_PATH = EVIDENCE_DIR / "eval_results_final_agent.jsonl"
 SUMMARY_PATH = EVIDENCE_DIR / "eval_summary_final_agent.json"
@@ -270,6 +280,8 @@ def main(argv: list[str]) -> int:
             f"tool={row['actual_tool_used']!s:5s} abstain={row['actual_abstained']!s:5s} "
             f"-> {mark} ({row['reason']}) {row['latency_ms']}ms"
         )
+        if i < len(remaining):
+            time.sleep(SLEEP_BETWEEN_QUESTIONS_S)
 
     rows = load_jsonl(RESULTS_PATH)
     request_ids = [r["request_id"] for r in rows if r.get("request_id")]
