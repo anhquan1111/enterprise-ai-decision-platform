@@ -1,0 +1,131 @@
+{
+  "n_questions": 12,
+  "n_correct": 9,
+  "n_infra_errors": 2,
+  "accuracy": "9/12",
+  "router_tool_selection": {
+    "n_checked": 9,
+    "n_match": 6
+  },
+  "latency_ms": {
+    "p50": 2807.0,
+    "p95": 7848.0,
+    "min": 1419,
+    "max": 7848
+  },
+  "total_tokens": {
+    "sum": 6189,
+    "mean": 618.9,
+    "n_with_token_data": 10
+  },
+  "per_question": [
+    {
+      "question_id": "H01",
+      "correct": true,
+      "reason": "correct",
+      "expected_tool": "sql",
+      "actual_tool_used": "sql",
+      "latency_ms": 1446,
+      "total_tokens": 340
+    },
+    {
+      "question_id": "H02",
+      "correct": false,
+      "reason": "http_error_503",
+      "expected_tool": "sql",
+      "actual_tool_used": null,
+      "latency_ms": null,
+      "total_tokens": null
+    },
+    {
+      "question_id": "H03",
+      "correct": true,
+      "reason": "abstained_correctly",
+      "expected_tool": "none",
+      "actual_tool_used": "none",
+      "latency_ms": 1419,
+      "total_tokens": 341
+    },
+    {
+      "question_id": "H04",
+      "correct": true,
+      "reason": "correct",
+      "expected_tool": "sql",
+      "actual_tool_used": "sql",
+      "latency_ms": 2257,
+      "total_tokens": 341
+    },
+    {
+      "question_id": "H05",
+      "correct": true,
+      "reason": "abstained_correctly",
+      "expected_tool": "docs",
+      "actual_tool_used": "none",
+      "latency_ms": 5096,
+      "total_tokens": 1212
+    },
+    {
+      "question_id": "H06",
+      "correct": true,
+      "reason": "abstained_correctly",
+      "expected_tool": "docs",
+      "actual_tool_used": "none",
+      "latency_ms": 2807,
+      "total_tokens": 660
+    },
+    {
+      "question_id": "H07",
+      "correct": false,
+      "reason": "wrong_or_unexpected_abstain",
+      "expected_tool": "both",
+      "actual_tool_used": "sql",
+      "latency_ms": 3275,
+      "total_tokens": 775
+    },
+    {
+      "question_id": "H08",
+      "correct": false,
+      "reason": "http_error_502",
+      "expected_tool": "both",
+      "actual_tool_used": null,
+      "latency_ms": null,
+      "total_tokens": null
+    },
+    {
+      "question_id": "H09",
+      "correct": true,
+      "reason": "abstained_correctly",
+      "expected_tool": null,
+      "actual_tool_used": "none",
+      "latency_ms": 5398,
+      "total_tokens": 671
+    },
+    {
+      "question_id": "H10",
+      "correct": true,
+      "reason": "abstained_correctly",
+      "expected_tool": "none",
+      "actual_tool_used": "none",
+      "latency_ms": 2012,
+      "total_tokens": 339
+    },
+    {
+      "question_id": "H11",
+      "correct": true,
+      "reason": "correct",
+      "expected_tool": "docs",
+      "actual_tool_used": "docs",
+      "latency_ms": 3335,
+      "total_tokens": 744
+    },
+    {
+      "question_id": "H12",
+      "correct": true,
+      "reason": "correct",
+      "expected_tool": "docs",
+      "actual_tool_used": "docs",
+      "latency_ms": 7848,
+      "total_tokens": 766
+    }
+  ]
+}

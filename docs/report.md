@@ -281,6 +281,10 @@ ask_auth_failures_total{reason="role_mismatch"} 1.0
 
 ## Final report on a fresh held-out set
 
+*This section is round 1, on the original non-diacritic corpus — sealed, kept as
+historical record. Round 2, on the diacritic corpus with a genuinely new 12-question
+set, is below under "Final report, round 2".*
+
 **Measured:** 15/09/2026. **Model:** `gemini-3.1-flash-lite` (router + generation),
 `gemini-embedding-001` at 384 dimensions — same pins as every earlier section,
 unchanged for this report. **Reproduce:**
@@ -462,3 +466,167 @@ declined to do). Summary; full detail in ADR-020:
   `eval/final.jsonl` (`scripts/probe_router_combined_tools.py`,
   `evidence/router_combined_tools_probe.json`): 6/6 selected both tools. Small
   sample — evidence of a real improvement, not a guarantee at scale.
+
+## Final report, round 2 — fresh held-out set on the diacritic system
+
+**Measured:** 15/09/2026. **Model:** `gemini-3.1-flash-lite` (router + generation),
+`gemini-embedding-001` at 384 dimensions — unchanged. **Reproduce:**
+`uv run python -m scripts.run_held_out_eval --report` (reads the sealed results on
+disk; the run itself cannot be repeated — see below).
+
+### Why a round 2, and why the round-1 set couldn't be reused
+
+The corpus and `eval/dev.jsonl` were rewritten from non-diacritic to full-diacritic
+Vietnamese (ADR-022). Editing the round-1 `eval/final.jsonl` in place to match — even
+just adding diacritics — would have meant re-scoring a set that had already been seen
+and reported on, which is exactly what a held-out set is not supposed to survive.
+Per the standing rule (ADR-010, restated in ADR-019): a seen set is not edited and
+not pretended fresh. The old set and its results are kept, unchanged, as history:
+`eval/final_v1_pre_diacritics.jsonl`,
+`evidence/eval_results_final_agent_v1_pre_diacritics.jsonl`,
+`evidence/eval_summary_final_agent_v1_pre_diacritics.json`. `eval/final.jsonl` and
+`evidence/eval_results_final_agent.jsonl` now hold round 2 — 12 genuinely new
+questions (`H13`–`H24`), checked against both the diacritic `eval/dev.jsonl` (25
+questions) and the round-1 set before being written, to avoid reusing any previously
+tested wording or fact combination. Full methodology and the exact leakage checks:
+ADR-024.
+
+### The 12 new questions
+
+Chosen to exercise angles round 1 (H01–H12) and `eval/dev.jsonl` had not covered, not
+to repeat them with different phrasing:
+
+| Coverage | Questions | Why new |
+|---|---|---|
+| SQL multi-month range query (`month_from` ≠ `month_to`) | H13 | every prior SQL question, round 1 included, asked about exactly one month |
+| SQL blocked for a **manager** on a department that isn't theirs, not executive | H14 | round 1 only tested an *employee* being blocked cross-department (H03) |
+| SQL, `hr` department, employee-level, both a normal and a provisional (not-yet-final) month | H15, H16 | round 1 never queried `hr` revenue directly (only via an executive cross-department call) |
+| SQL month with zero rows (business "no data" abstain) | H17 | same mechanism as round 1's H10, different department, to confirm it isn't a finance-only code path |
+| Docs, **manager** blocked from an executive-only chunk in their **own** department | H18 | isolates the access-level dimension from the department dimension — round 1's blocked cases were employee-level; this is a level *and* a same-department boundary |
+| No-knowledge probe on a genuinely new absent topic (health insurance) | H19 | round 1's and dev's no-knowledge probes (remote work, Japanese lessons) are different topics; reusing either would test memorized abstention, not the mechanism |
+| Combined SQL+docs, employee role, department other than round 1's H07/H08 | H20, H21 | round 1's two combined questions were both asked as a manager; this checks the same code path at employee level |
+| Docs, heavy paraphrase of a fact already tested with direct wording elsewhere (vacation carryover, rollback time limit) | H22, H23 | same "paraphrase headroom" spirit as round 1's H11/H12, applied to facts not yet paraphrase-tested |
+| A question the system architecturally cannot answer correctly (revenue summed across all 4 departments in one call) | H24 | `SqlArgs.department` is a single `Literal`, not a list — no valid query represents "all departments"; the honest behaviour is to decline, not guess with one department's number |
+
+Employees: 8 new dedicated records, `emp_109`–`emp_116`
+(`sql/07_eval_held_out_employees.sql`, tracked in the repo — round 1's
+`emp_101`–`emp_108` were inserted ad hoc and never committed, a gap closed here).
+Same reasoning as round 1: never touch a key already issued and possibly in use.
+Real API keys were issued via `scripts/issue_api_keys.py`, used once for this run,
+kept outside the repo.
+
+### A real reliability bug, found and fixed mid-run — not a correctness fix
+
+The first attempt at this run returned **0/12**, every question failing with a real
+Gemini `503 "high demand"` response — confirmed directly against the API, not a bug
+in this project's retry logic at first glance. Investigating *which* questions failed
+revealed a pattern: every SQL-only question succeeded, every question touching docs
+retrieval failed. The cause was a genuine gap, not congestion alone —
+`src/embeddings.py` (the one function that embeds both corpus chunks at ingest time
+and the caller's question at query time) had **no retry logic at all**, unlike
+`generation.py` and `router.py`, which have carried `_NETWORK_RETRY_ATTEMPTS` with
+backoff and jitter since ADR-016. A single transient 503 from
+`gemini-embedding-001` killed the whole request immediately — `agent/loop.py`'s
+tool-level `_retry()` wrapper only catches connection-level failures
+(`ConnectError`/`TimeoutException`), not HTTP status errors, so it gave no
+second chance either. Fixed by giving `embed()` the exact same retry/backoff/jitter
+shape as `_call_gemini` in the other two modules (ADR-024), with a dedicated
+regression test (`tests/test_embeddings.py`).
+
+**Why this doesn't compromise the held-out run's integrity.** The fix was made
+before any docs-touching question had produced a scored result — the first evidence
+was five SQL-only successes (H13–H17) against a wall of HTTP 503s on every other
+question, an infrastructure signal, not a correctness one. Nothing about routing,
+retrieval ranking, RBAC, or generation content was touched. This is the same
+category as round 1's harness bug (fixed mid-attempt, run restarted from zero) — a
+gap in the plumbing that was blocking the test from running at all, discovered
+without ever seeing whether an *answer* was right or wrong. What would **not** be
+acceptable, and did not happen here: changing the router prompt, a RBAC rule, or a
+grounding check *because* a question was answered incorrectly.
+
+After the fix, the remaining questions were retried in stages, each time keeping the
+already-real results and re-running only the rows that had failed on pure
+infrastructure grounds (`request_id: null`, no answer produced) — never a row that
+had received a real, scored answer. All 12 questions eventually completed with a real
+`/ask` response.
+
+### Results
+
+11/12 correct, 1 genuine wrong answer, 0 infrastructure errors in the final state:
+
+| Q | Expected | Actual | Result |
+|---|---|---|---|
+| H13 | sql, range query | sql, correct | OK |
+| H14 | blocked (RBAC, manager cross-dept) | blocked | OK |
+| H15 | sql, correct | sql, correct | OK |
+| H16 | sql, provisional-month | sql, correct incl. "tạm tính" | OK |
+| H17 | no data (business abstain) | abstained | OK |
+| H18 | blocked (RBAC, manager same-dept, wrong level) | abstained | OK |
+| H19 | no_knowledge | abstained | OK |
+| H20 | **both** (sql+docs) | both | OK |
+| H21 | both (sql+docs) | **sql only** | **wrong** |
+| H22 | docs, paraphrase | docs, correct | OK |
+| H23 | docs, paraphrase | docs, correct | OK |
+| H24 | unsupported aggregation, decline | abstained | OK |
+
+Router tool-selection matched the labelled expectation on 8/10 checked questions (H19
+and H24 have no single "right" tool label and are excluded from this count, not from
+correctness).
+
+**H21 repeats round 1's H07 failure mode, after a prompt fix that was measured as
+working.** ADR-020 strengthened the router's `SYSTEM_INSTRUCTION` after H07 (explicit
+two-condition checklist, worked example) and verified it on 6 fresh combined
+questions — 6/6 selected both tools
+(`evidence/router_combined_tools_probe.json`). H21 is a 7th, independently written
+combined question, unseen by that probe or any prior tuning, and the router dropped
+`docs` again, choosing `sql` only. This does not mean the ADR-020 fix did nothing —
+6/6 was a real, measured improvement over the un-prompted baseline — but it does mean
+6 examples were not enough to call the gap closed. Left as a finding, not patched:
+fixing the router prompt *because of what H21 revealed* would be tuning on a held-out
+result, exactly what this project's rule forbids. A real fix needs a larger, dedicated
+probe set (same spirit as `scripts/probe_router_combined_tools.py`, bigger), not a
+one-off prompt tweak validated by the same set that exposed the problem.
+
+**Latency** (`latency_ms` from the real HTTP response, all 12 requests completed):
+
+| Percentile | ms |
+|---|---:|
+| p50 | 8,394 |
+| p95 | 21,045 |
+| min | 1,515 |
+| max | 42,553 |
+
+Materially higher and more variable than round 1's (p50 2,807 / p95 7,848). Not a
+regression in the system under test — every number above includes the real retry
+backoff from the embeddings fix and from genuine Gemini-side congestion on the day
+of this run (see previous section). Round 1 ran during a quieter period. This is
+latency *as experienced that day*, not a steady-state figure; comparing the two
+rounds as if they measured the same conditions would be the wrong lesson to draw.
+
+**Token cost** (real `usageMetadata.totalTokenCount`, read from `audit_log`):
+
+| | |
+|---|---:|
+| Sum, 12 completed requests | 10,013 tokens |
+| Mean per request | 834.4 tokens |
+
+**Converted to VND/USD**, same methodology and same-day pricing/exchange-rate
+sources as ADR-023 (`gemini-3.1-flash-lite` standard tier, $0.25/1M input tokens,
+$1.50/1M output tokens; 1 USD = 25,981.41 VND) — a range, not a point estimate, for
+the same reason as before: `audit_log` stores only the combined token count, not the
+input/output split (still-open gap, ADR-023):
+
+| | Lower bound (all tokens at input rate) | Upper bound (all tokens at output rate) |
+|---|---:|---:|
+| This run — 10,013 tokens, 12 completed requests | $0.0025 (~65 VND) | $0.0150 (~390 VND) |
+| Per 1,000 requests, at this run's mean (834.4 tokens/request) | $0.209 (~5,420 VND) | $1.252 (~32,518 VND) |
+
+### What this section did not attempt
+
+- Fixing H21 (see above — would be tuning on a held-out result).
+- A held-out rerun after any future fix — would need a **round 3** set; this one is
+  now spent.
+- Closing the token-cost input/output split gap (ADR-023's "Known gap" still stands).
+- Load/concurrency testing — still sequential, one request at a time, same as every
+  eval run before it. The unusually high latency in this round came from real
+  external congestion, not concurrent load generated by this project.

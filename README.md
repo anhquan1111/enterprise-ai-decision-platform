@@ -6,15 +6,19 @@ or in **internal policy documents (retrieval)**, and answers **with citations**,
 **only within the asker's access scope**, while **logging every request for
 audit**.
 
-> **Status: final report on a fresh held-out set.** A genuinely new 12-question
-> held-out set (`eval/final.jsonl`) was run **once**, through the real, running
-> `/ask` endpoint with real authentication — 9/12 correct, 2 infrastructure errors,
-> 1 genuine router mistake, none patched mid-run (that would defeat the point of a
-> held-out set). Real p50/p95 latency and real per-request token cost, both read
-> from `audit_log` for the first time (the column existed unused since the data
-> layer was built — see ADR-018). Full results, the three real bugs the held-out run
-> found, and why they were left unpatched until after scoring:
-> [`docs/report.md`](docs/report.md) (held-out section) and ADR-019.
+> **Status: final report, round 2, on a fresh held-out set.** After the corpus moved
+> to full-diacritic Vietnamese (ADR-022), the round-1 held-out set and results were
+> kept as history and a genuinely new 12-question set (`eval/final.jsonl`) was
+> written and run **once**, through the real, running `/ask` endpoint with real
+> authentication — 11/12 correct, 1 genuine router mistake (the same failure mode as
+> round 1's, recurring after a prior fix — see below), 0 infrastructure errors in the
+> final state. Mid-run, a real reliability gap was found and fixed: `src/embeddings.py`
+> had no retry logic at all, unlike generation/router calls, so a single transient
+> 503 from the embedding API killed any docs-touching request outright (ADR-024).
+> Real p50/p95 latency and real per-request token cost, read from `audit_log`. Full
+> results and why the recurring router mistake was left unpatched:
+> [`docs/report.md`](docs/report.md) ("Final report, round 2") and ADR-024. Round 1's
+> report (9/12, on the pre-diacritics corpus) is kept as history in the same file.
 >
 > `/ask` requires a real API key (`Authorization: Bearer <key>`) — RBAC runs on
 > the **authenticated** role/department, not a self-declared request field, closing a

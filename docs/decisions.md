@@ -1018,3 +1018,81 @@ chạy một lần). Muốn có con số chính xác thay vì khoảng, cần m�
 `prompt_tokens`/`candidates_tokens` vào `audit_log` rồi đo trên một lần chạy MỚI
 (một eval set khác, không phải tập đã niêm phong) — ghi nhận là khoảng trống đã
 biết, không phải điểm mù.
+
+## ADR-024 — Held-out vòng 2: tập 12 câu mới, một lỗ hổng retry thật phát hiện giữa lúc chạy
+
+**Ngày:** báo cáo cuối, vòng 2 · **Trạng thái:** accepted
+
+**Bối cảnh.** ADR-022 chuyển corpus và `eval/dev.jsonl` sang có dấu, và người dùng
+yêu cầu rõ: giữ nguyên `eval/final.jsonl` (12 câu, đã niêm phong, đã chạy, đã có kết
+quả trong báo cáo) làm hồ sơ lịch sử, viết một tập held-out **mới hoàn toàn** để
+tránh leakage, rồi chạy một lần và cập nhật báo cáo. ADR này ghi lại toàn bộ quá
+trình đó.
+
+**Lưu trữ tập cũ, không sửa.** `eval/final.jsonl`,
+`evidence/eval_results_final_agent.jsonl`, `evidence/eval_summary_final_agent.json`
+được đổi tên thành hậu tố `_v1_pre_diacritics` (không xoá), trước khi viết tập mới
+vào đúng tên file gốc — cùng cơ chế đã dùng ở ADR-022 cho `evidence/eval_results_dev.jsonl`.
+`scripts/run_held_out_eval.py` đã có sẵn đúng cờ cho tình huống này
+(`--force`, với comment từ trước "sau khi eval/final.jsonl được viết lại từ đầu") —
+không cần sửa script để hỗ trợ vòng 2.
+
+**12 câu mới (H13–H24), kiểm tra chéo với cả `eval/dev.jsonl` (có dấu, 25 câu) và
+tập held-out vòng 1 trước khi viết**, nhắm vào các góc chưa từng đo: SQL truy vấn
+nhiều tháng liên tiếp (H13, trước giờ mọi câu SQL chỉ hỏi đúng một tháng), SQL bị
+chặn ở cấp **manager** (H14 — vòng 1 chỉ thử employee bị chặn), doanh thu phòng hr
+truy vấn trực tiếp (H15/H16 — vòng 1 chỉ thấy hr qua đường executive liên phòng
+ban), chặn quyền tách riêng chiều "level" khỏi chiều "department" bằng cách chặn một
+manager khỏi tài liệu executive-only **trong chính phòng ban của họ** (H18), một chủ
+đề hoàn toàn vắng mặt mới (bảo hiểm y tế, H19), câu hỏi kết hợp sql+docs ở cấp
+employee thay vì manager (H20/H21 — vòng 1 chỉ thử ở manager), paraphrase mạnh cho
+hai sự kiện chưa từng bị diễn giải lại (H22/H23), và một câu hỏi hệ thống **không
+thể** trả lời đúng về mặt kiến trúc — tổng doanh thu bốn phòng ban cùng lúc, vì
+`SqlArgs.department` là một `Literal` đơn, không phải danh sách (H24) — hành vi đúng
+là từ chối, không đoán bằng số của một phòng ban.
+
+**8 nhân viên eval mới, có tracking trong repo — sửa luôn một khoảng trống từ vòng
+1.** `sql/07_eval_held_out_employees.sql` (emp_109–emp_116, idempotent, cùng mẫu
+`ON CONFLICT` với `02_seed.sql`). Vòng 1 tạo `emp_101`–`emp_108` bằng lệnh ad hoc,
+không có trong repo — không tái lập được từ mã nguồn. Không thể tái sử dụng
+`emp_101`–`emp_108`: key thật của họ chỉ hiển thị một lần lúc cấp, đã mất; và
+`scripts/issue_api_keys.py` cố tình **không bao giờ cấp lại** key cho nhân viên đã
+có hash (tránh vô hiệu hoá key đang dùng của người khác) — đây chính là lý do cần
+nhân viên mới, không phải một lựa chọn tuỳ ý.
+
+**Một lỗ hổng độ tin cậy thật, phát hiện và vá GIỮA LÚC chạy — không phải sửa vì
+điểm đúng/sai.** Lần chạy đầu tiên: 0/12, toàn bộ 12 câu đều nhận `503 "high
+demand"` thật từ Gemini (xác nhận trực tiếp bằng curl, không phải lỗi ở tầng retry
+của dự án). Soi kỹ hơn lộ ra quy luật: mọi câu SQL-only đều qua, mọi câu chạm tới
+docs retrieval đều fail. Nguyên nhân: `src/embeddings.py` — hàm DUY NHẤT dùng để
+embed cả chunk lúc ingest lẫn câu hỏi lúc truy vấn — **chưa từng có logic retry
+nào**, khác hẳn `generation.py` và `router.py` đã có `_NETWORK_RETRY_ATTEMPTS` kèm
+backoff/jitter từ ADR-016. Một lần 503 thoáng qua từ `gemini-embedding-001` giết
+chết ngay request, và `agent/loop.py`'s `_retry()` ở tầng tool chỉ bắt lỗi mạng
+(`ConnectError`/`TimeoutException`), không bắt `HTTPStatusError`, nên cũng không có
+cơ hội thứ hai. Vá bằng cách đưa `embed()` về đúng cấu trúc retry/backoff/jitter của
+`_call_gemini` ở hai module kia, kèm test hồi quy riêng
+(`tests/test_embeddings.py`).
+
+**Vì sao việc vá giữa chừng KHÔNG làm hỏng tính toàn vẹn của tập held-out.** Lúc phát
+hiện, chưa có câu nào chạm docs từng ra được một kết quả có chấm điểm — bằng chứng
+duy nhất lúc đó là 5 câu SQL-only thành công (H13–H17) đối lập với một bức tường
+503 ở mọi câu còn lại: đây là tín hiệu hạ tầng, không phải tín hiệu đúng/sai. Không
+gì trong router, retrieval, RBAC, hay nội dung generation bị đụng tới. Cùng loại
+tình huống với lỗi harness của vòng 1 (ADR trước: vá giữa chừng, chạy lại từ đầu) —
+một lỗ hổng trong đường ống đang chặn cả việc chạy được, phát hiện mà chưa hề biết
+câu trả lời đúng hay sai. Điều **sẽ không được phép**, và không xảy ra ở đây: sửa
+prompt router, một luật RBAC, hay một bước kiểm grounding **vì** một câu bị trả lời
+sai.
+
+**Kết quả: 11/12 đúng, 1 sai thật, 0 lỗi hạ tầng ở trạng thái cuối cùng.** Chi tiết
+đầy đủ, bảng kết quả, latency, chi phí token quy đổi VNĐ/USD: `docs/report.md` mục
+"Final report, round 2". Điểm đáng chú ý nhất: **H21 lặp lại đúng lỗi H07 của vòng
+1** (router bỏ một tool khỏi câu hỏi kết hợp) — dù ADR-020 đã siết prompt router và
+đo được 6/6 đúng trên một probe riêng sau đó. H21 là câu kết hợp độc lập thứ 7,
+chưa từng nằm trong probe hay bất kỳ lần tinh chỉnh nào, và router vẫn bỏ `docs`.
+Không kết luận rằng bản vá ADR-020 vô dụng (6/6 là cải thiện thật, đo được) — chỉ
+kết luận 6 mẫu chưa đủ để coi khoảng trống đã đóng. **Để nguyên không vá**, đúng quy
+tắc: sửa router prompt *vì* H21 sẽ là tinh chỉnh dựa trên kết quả held-out, đúng
+điều luật này cấm. Cần một probe lớn hơn, độc lập, không phải một lần chỉnh nhanh
+được xác nhận bằng chính tập đã lộ ra vấn đề.
