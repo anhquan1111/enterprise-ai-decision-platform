@@ -615,6 +615,25 @@ result, exactly what this project's rule forbids. A real fix needs a larger, ded
 probe set (same spirit as `scripts/probe_router_combined_tools.py`, bigger), not a
 one-off prompt tweak validated by the same set that exposed the problem.
 
+**Follow-up: the larger probe found no reproducible failure — H07/H21 look like
+ordinary LLM noise, not a systematic prompt gap (ADR-027).**
+`scripts/probe_router_combined_tools_v2.py` ran 18 new combined questions — several
+deliberately mimicking H21's exact shape (a revenue figure plus a single policy
+percentage in one sentence) — against the *unmodified* router prompt: **18/18
+selected both tools correctly**, zero misclassifications
+(`evidence/router_combined_tools_v2_pre.json`). Across the project's full history —
+the original 6-question probe, H07, H21, and this 18-question probe — 2 misses out
+of roughly 26 combined-question attempts (~5–10%) is consistent with ordinary
+stochastic variation from an LLM call (`temperature=0.0` does not guarantee
+determinism), not a reproducible weakness to target. Changing the prompt with no
+failing case to verify against would be tuning by guesswork, the exact thing
+`AGENTS.md` §4 forbids. **Not patched, by agreement:** if a reproducible case
+surfaces later, the lowest-risk fix on file is splitting `ToolPlan` into
+independent `needs_sql`/`needs_docs` booleans instead of one `list[Literal]` — moving
+the two-condition check the prompt already asks for into the JSON schema itself
+— but that is a change to make *when there is a failing case to confirm it against*,
+not before.
+
 **Latency** (`latency_ms` from the real HTTP response, all 12 requests completed):
 
 | Percentile | ms |

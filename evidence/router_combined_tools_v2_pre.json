@@ -1,0 +1,190 @@
+{
+  "tag": "pre",
+  "measured_at": "2026-09-15T17:18:04+00:00",
+  "n_questions": 18,
+  "n_got_both_tools": 18,
+  "n_infra_errors": 0,
+  "rate": "18/18",
+  "rows": [
+    {
+      "question": "Trưởng phòng sales muốn biết doanh thu tháng 1 năm 2026, đồng thời mức giảm giá tối đa nhân viên được tự quyết hiện nay là bao nhiêu phần trăm?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 583,
+      "infra_error": null
+    },
+    {
+      "question": "So doanh thu sales tháng 2 và tháng 3 năm 2026 ra sao, và chính sách giảm giá dành cho nhân viên kinh doanh hiện tại quy định mức tối đa bao nhiêu?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 586,
+      "infra_error": null
+    },
+    {
+      "question": "Phòng finance tháng 4 năm 2026 đạt doanh thu bao nhiêu, và trưởng phòng được duyệt chi tối đa bao nhiêu mà không cần ai phê duyệt thêm?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 580,
+      "infra_error": null
+    },
+    {
+      "question": "Cho tôi số liệu doanh thu finance tháng 5 năm 2026, kèm theo thông tin số doanh thu tháng được chốt chính thức vào ngày nào?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 579,
+      "infra_error": null
+    },
+    {
+      "question": "Nhân viên phòng finance được đề xuất chi tối đa bao nhiêu mà không cần duyệt thêm, và doanh thu phòng này trong tháng 2 năm 2026 là bao nhiêu?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 582,
+      "infra_error": null
+    },
+    {
+      "question": "Doanh thu kỹ thuật tháng 3 năm 2026 ra sao, và mọi bản release cần qua bước gì trước khi lên production?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 575,
+      "infra_error": null
+    },
+    {
+      "question": "Trước khi triển khai lên production, một bản release engineering cần đạt điều kiện gì, và doanh thu phòng này tháng 5 năm 2026 là bao nhiêu?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 580,
+      "infra_error": null
+    },
+    {
+      "question": "Doanh thu engineering từ tháng 1 đến tháng 6 năm 2026 là bao nhiêu, và quyền truy cập dữ liệu khách hàng được cấp và thu hồi theo quy tắc nào?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 585,
+      "infra_error": null
+    },
+    {
+      "question": "Phòng hr tháng 4 năm 2026 có doanh thu bao nhiêu, và một nhân viên chính thức được nghỉ phép bao nhiêu ngày mỗi năm?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 577,
+      "infra_error": null
+    },
+    {
+      "question": "Trưởng phòng được phép mở tuyển dụng khi nào, và doanh thu hr tháng 1 năm 2026 là bao nhiêu?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 573,
+      "infra_error": null
+    },
+    {
+      "question": "Ứng viên cần trải qua bao nhiêu vòng phỏng vấn kỹ thuật trước khi nhận offer, đồng thời cho tôi biết doanh thu phòng hr tháng 3 năm 2026?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 584,
+      "infra_error": null
+    },
+    {
+      "question": "Tôi cần biết doanh thu sales tháng 4 năm 2026, và ngày phép hàng năm của một nhân viên chính thức là bao nhiêu ngày?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 577,
+      "infra_error": null
+    },
+    {
+      "question": "Số liệu doanh thu finance tháng 3 năm 2026 thế nào, và quy trình release lên production yêu cầu những bước nào?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 574,
+      "infra_error": null
+    },
+    {
+      "question": "Doanh thu engineering tháng 2 năm 2026 là bao nhiêu, và công ty quy định mức giảm giá tự do hiện tại cho nhân viên kinh doanh là bao nhiêu phần trăm?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 585,
+      "infra_error": null
+    },
+    {
+      "question": "Khoản chi trên 50 triệu đồng cuối cùng do ai phê duyệt, và doanh thu phòng hr tháng 5 năm 2026 ra sao?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 578,
+      "infra_error": null
+    },
+    {
+      "question": "Ngày phép không dùng hết trong năm có được cộng dồn sang năm sau không, và doanh thu sales tháng 6 năm 2026 hiện tại là bao nhiêu?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 581,
+      "infra_error": null
+    },
+    {
+      "question": "Doanh thu phòng finance 6 tháng đầu năm 2026 ra sao, và nếu một bản release gặp sự cố thì phải xử lý trong tối đa bao lâu?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 581,
+      "infra_error": null
+    },
+    {
+      "question": "Quy trình tuyển dụng của trưởng phòng cần điều kiện gì về ngân sách headcount, và doanh thu phòng hr tháng 2 năm 2026 là bao nhiêu?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 579,
+      "infra_error": null
+    }
+  ]
+}

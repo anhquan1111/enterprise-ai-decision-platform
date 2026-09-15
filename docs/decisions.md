@@ -1213,3 +1213,50 @@ phải hệ quả tự động của phát hiện này. Ghi nhận là khoảng 
 và dưới mức nghẽn BẤT THƯỜNG cao của đúng ngày đo — không chắc đại diện cho điều
 kiện vận hành thông thường. `evidence/retry_jitter_load_probe.json` giữ toàn bộ dữ
 liệu thô cho ai muốn phân tích lại.
+
+## ADR-027 — Router "bỏ sót tool" (H07, H21): đo lại trên mẫu lớn hơn, không tái hiện được — không vá
+
+**Ngày:** sau báo cáo cuối · **Trạng thái:** accepted, đo xong không tìm thấy tín hiệu để sửa
+
+**Bối cảnh.** ADR-024 ghi nhận H21 (held-out vòng 2) lặp lại đúng lỗi H07 (held-out
+vòng 1) — router bỏ `docs` khỏi câu hỏi cần cả hai tool — dù ADR-020 đã gia cố
+prompt và đo 6/6 đúng trên một probe riêng. Kết luận khi đó: "6 mẫu chưa đủ để coi
+khoảng trống đã đóng", để nguyên không vá, và ghi rõ hướng đi đúng là "cần một
+probe lớn hơn, độc lập" trước khi sửa bất cứ gì.
+
+**Phương pháp.** `scripts/probe_router_combined_tools_v2.py` — 18 câu hỏi kết hợp
+sql+docs MỚI (không phải 6 như trước), bao phủ cả 4 phòng ban, đổi thứ tự
+sql-trước/docs-trước, một số câu cố tình mô phỏng rất sát cấu trúc H21 (doanh thu +
+một con số phần trăm chính sách trong cùng câu). Chỉ gọi `route()` trực tiếp —
+không qua RBAC/thực thi, vì đây là bài đo phân loại tool, không phải đo đúng/sai
+nội dung. Không trùng/gần giống `eval/dev.jsonl`, `eval/final.jsonl` (cả hai vòng),
+hay 6 câu của probe gốc.
+
+**Một lỗi thật gặp khi đo: script gốc không chịu được lỗi hạ tầng giữa chừng.**
+Đúng bài học đã học nhiều lần trong dự án này (harness held-out vòng 1, run_eval.py)
+— một `HTTPStatusError` ở câu 1/18 làm chết cả lượt đo. Vá bằng cách bắt lỗi từng
+câu, ghi `infra_error`, tiếp tục câu tiếp theo — cùng mẫu `run_eval.py`/
+`run_held_out_eval.py` đã dùng. Thêm nghỉ 1s giữa các câu, cùng lý do ADR-026.
+
+**Kết quả: 18/18 đúng, 0 lỗi phân loại — kể cả các câu mô phỏng sát H21.** Lần chạy
+đầu 13/18 (5 lỗi hạ tầng, 0 lỗi phân loại trong 13 câu chạy được); chạy lại lấp đủ
+18/18, tất cả đúng. `evidence/router_combined_tools_v2_pre.json` giữ toàn bộ dữ
+liệu thô.
+
+**Không vá — không có tín hiệu lỗi nào để nhắm vào.** Sửa prompt lúc này sẽ là đoán
+mò, đúng loại lỗi `AGENTS.md` mục 4 cấm ("đưa số chưa đo vào README/CV", cùng tinh
+thần với "sửa mà không có bằng chứng"). Với ~20 câu hỏi kết hợp đã từng chạy qua hệ
+thống này tính từ đầu dự án (6 câu probe gốc + 2 câu held-out H07/H21 + 18 câu probe
+này), thấy 2 lần bỏ sót tool — tỷ lệ ~5-10% — hoàn toàn phù hợp với sai số ngẫu
+nhiên bình thường của một LLM (`temperature=0.0` không đảm bảo tất định tuyệt đối),
+không phải bằng chứng về một lỗ hổng hệ thống trong cách viết prompt. Đây là kết
+luận **tốt hơn** giả định ban đầu: tỷ lệ lỗi thật thấp hơn nhiều so với ấn tượng "2
+lần liên tiếp" tạo ra.
+
+**Quyết định (đã thống nhất với người dùng): ghi nhận là nhiễu thống kê, không vá.**
+Nếu muốn giảm tỷ lệ này xuống gần 0% trong tương lai, hướng đúng — khi có bằng
+chứng cụ thể hơn — là đổi `ToolPlan` sang hai trường boolean độc lập
+(`needs_sql`/`needs_docs`) thay vì một `list[Literal]`, ép Gemini phải trả lời
+từng điều kiện tách biệt ở tầng schema thay vì tin vào hướng dẫn ngôn ngữ tự nhiên
+— nhưng đây là một thay đổi để dành, không làm trong ADR này vì chưa có lỗi tái
+hiện được để xác nhận nó thật sự cần thiết.

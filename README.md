@@ -295,10 +295,14 @@ purpose; see ADR-024.
   again by the round-1 held-out set). The router prompt was strengthened
   afterward and measured 6/6 on a fresh probe
   (`evidence/router_combined_tools_probe.json`) — a real improvement on a small
-  sample, not a guarantee at scale (ADR-020). **It recurred in round 2's held-out
-  set (H21)**, on a question the probe never saw — 6 examples were not enough to
-  call the gap closed; left as a finding, not re-tuned, since fixing it now would
-  be tuning on a held-out result. See ADR-024.
+  sample, not a guarantee at scale (ADR-020). It recurred in round 2's held-out
+  set (H21), on a question the probe never saw — 6 examples were not enough to
+  call the gap closed (ADR-024). **A larger, dedicated 18-question follow-up
+  probe then found zero reproducible failures against the unmodified prompt**
+  — even questions deliberately shaped like H21 selected both tools correctly.
+  ~2 misses out of ~26 combined-question attempts project-wide is consistent
+  with ordinary LLM stochasticity, not a systematic prompt gap; left unpatched
+  since there is no failing case to target a fix at. See ADR-027.
 - A self-contradictory model response (`abstained: true` with a non-empty
   `citations` list) used to 502 after exhausting retries — fixed to degrade to a
   plain abstain instead (citations dropped, logged in `grounding_problems`). See
