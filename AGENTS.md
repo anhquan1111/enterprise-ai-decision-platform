@@ -73,6 +73,14 @@ docker compose exec -T db psql -U app -d enterprise_ai -f /sql/01_schema.sql
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/02_seed.sql
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/06_auth.sql   # cột api_key_hash
 
+# Alembic (ADR-025): cách này vẫn là cách nhanh nhất để dựng một DB dev SẠCH từ đầu.
+# Alembic quản lý các thay đổi schema TIẾP THEO trên một DB đã tồn tại — không thay
+# thế bốn dòng trên, không autogenerate (không có ORM metadata để diff theo).
+uv run alembic upgrade head       # áp mọi migration chưa chạy trên DB hiện tại
+uv run alembic current            # xem DB đang ở revision nào
+uv run alembic downgrade -1       # lùi lại một migration (test rollback trước khi apply thật)
+uv run alembic revision -m "mo ta thay doi"   # tạo migration mới, viết tay upgrade()/downgrade()
+
 # Ingest tài liệu. Dùng -m để project root vào sys.path, không phải python scripts/...
 uv run python -m scripts.ingest                            # corpus chính, 16 chunk
 uv run python -m scripts.ingest data/documents_dirty.csv   # xem quarantine hoạt động

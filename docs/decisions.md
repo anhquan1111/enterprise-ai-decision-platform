@@ -1096,3 +1096,66 @@ kết luận 6 mẫu chưa đủ để coi khoảng trống đã đóng. **Để
 tắc: sửa router prompt *vì* H21 sẽ là tinh chỉnh dựa trên kết quả held-out, đúng
 điều luật này cấm. Cần một probe lớn hơn, độc lập, không phải một lần chỉnh nhanh
 được xác nhận bằng chính tập đã lộ ra vấn đề.
+
+## ADR-025 — Thêm Alembic làm công cụ migration, không thay thế `sql/*.sql`
+
+**Ngày:** sau báo cáo cuối · **Trạng thái:** accepted
+
+**Bối cảnh.** Từ trước tới giờ, mọi thay đổi schema đi qua các file `sql/*.sql`
+đánh số thứ tự (`00_extensions`, `01_schema`, `06_auth`, ...), áp thủ công bằng
+`psql -f`. Cách này đủ dùng khi dự án chỉ có một môi trường (`db` container local)
+và một người vận hành, nhưng không trả lời được hai câu hỏi cơ bản của bất kỳ hệ
+thống nhiều môi trường nào: "database này đang ở đúng phiên bản schema nào?" và "áp
+đúng-và-chỉ-đúng những thay đổi còn thiếu, theo thứ tự đúng, như thế nào?" —
+`01_schema.sql` tự nó bắt đầu bằng `DROP TABLE IF EXISTS ...`, nghĩa là chạy lại
+trên một DB đã có dữ liệu sẽ XOÁ SẠCH dữ liệu đó. Đây không phải lỗi thiết kế cho
+mục đích ban đầu (dựng nhanh một DB dev sạch), nhưng là một khoảng trống thật nếu
+sau này có nhiều môi trường (staging/prod) hay nhiều người cùng sửa schema.
+
+**Quyết định.** Thêm Alembic (`alembic>=1.13.0`, `sqlalchemy>=2.0.0` — chỉ dùng
+SQLAlchemy làm engine kết nối, không dùng ORM/ `declarative_base`/`Table` object
+nào). `target_metadata = None` trong `alembic/env.py` — không có autogenerate, vì
+không có model nào để diff theo; mọi migration viết tay bằng `op.execute()` chứa
+raw SQL, cùng triết lý với `src/db.py`: "đọc được, giải thích được, đọc được query
+plan", áp dụng luôn cho migration.
+
+**`alembic/env.py` đọc connection string từ `src.config.Settings`, không lặp lại
+cấu hình trong `alembic.ini`.** Hai nơi cấu hình DB là cách lệch cấu hình xảy ra —
+đúng bài học đã áp dụng cho mọi phần khác của dự án (`docs/decisions.md` nhiều ADR
+lặp lại nguyên tắc "một nguồn sự thật"). Vướng một lỗi thật lúc nối dây: `database_url`
+chứa `%20`/`%3D` (URL-encoded), còn `configparser` (nền của `alembic.ini`) dùng `%`
+cho cú pháp interpolation riêng của nó — ghi thẳng chuỗi URL vào
+`config.set_main_option()` báo `ValueError: invalid interpolation syntax`. Vá bằng
+cách nhân đôi mọi `%` thành `%%` trước khi ghi (đúng cách configparser escape ký tự
+đặc biệt của chính nó).
+
+**Migration `9064d9299cfa` (baseline) chụp lại đúng schema đang chạy, không bắt đầu
+từ rỗng.** Dự án đã chạy production-shaped từ lâu trước khi có Alembic — "baseline"
+ở đây nghĩa là "mô tả lại cái đã có" (00_extensions + 01_schema + 06_auth, chép
+nguyên văn), không phải điểm khởi đầu mới. **Cố ý chép tay SQL vào file migration
+thay vì đọc lại `sql/*.sql` lúc chạy**: một migration phải là ảnh chụp bất biến —
+`sql/01_schema.sql` sẽ còn đổi theo các ADR sau này, và nếu migration đọc lại file
+đó mỗi lần chạy, lịch sử migrate sẽ không còn tái lập đúng được (chạy `upgrade` ở
+một thời điểm sau sẽ áp một schema khác với schema mà migration đó *nói* nó áp,
+tuỳ vào `sql/01_schema.sql` lúc đó đang có nội dung gì). Trùng lặp giữa
+`sql/01_schema.sql` và migration là chấp nhận được — đây là chi phí đứng đắn của
+việc có lịch sử migration đúng nghĩa, không phải sơ suất.
+
+**Đo thật trước khi coi là xong, không tin migration chạy không lỗi là đủ.** Tạo
+một database tạm (`CREATE DATABASE alembic_test`) trong cùng container `db`, chạy
+`alembic upgrade head` lên đó, rồi `pg_dump --schema-only` cả hai database
+(`alembic_test` và `enterprise_ai` thật) và `diff` — giống hệt nhau ngoại trừ token
+bảo mật ngẫu nhiên của chính `pg_dump`. Chạy tiếp `alembic downgrade base` trên
+`alembic_test`, xác nhận cả 7 bảng bị xoá sạch, chỉ còn `alembic_version`. Sau khi
+xác nhận, xoá `alembic_test`, rồi `alembic stamp head` trên `enterprise_ai` thật
+(ghi nhận "đang ở revision này", KHÔNG chạy lại DDL — schema đã có sẵn, chạy lại
+`CREATE TABLE` sẽ lỗi "already exists"). Xác nhận dữ liệu thật không suy chuyển:
+`doc_chunks` vẫn 16 dòng, `employees` vẫn đủ (8 seed gốc + 16 eval hai vòng
+held-out) sau `stamp`.
+
+**Không thay thế `sql/00_extensions.sql`/`01_schema.sql`/`02_seed.sql`/`06_auth.sql`.**
+`01_schema.sql`'s `DROP TABLE IF EXISTS` đầu file vẫn là cách nhanh nhất dựng một DB
+dev sạch từ đầu (một lệnh, không cần biết lịch sử migration). Alembic quản lý các
+thay đổi schema TIẾP THEO trên một DB đã tồn tại — từ migration kế tiếp trở đi, mọi
+`ALTER TABLE`/`CREATE TABLE` mới nên đi qua `alembic revision` thay vì thêm một file
+`sql/0N_*.sql` đánh số mới, để có lịch sử version thật thay vì chỉ có thứ tự file.

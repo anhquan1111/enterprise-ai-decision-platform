@@ -14,12 +14,17 @@ dependencies = [
     "pydantic-settings>=2.15.0",
     "psycopg[binary,pool]>=3.2.0",
     "pgvector>=0.3.6",
-    # Ingestion và bộ eval (D2) đều xử lý dữ liệu dạng bảng; để ở dependency chính
-    # thay vì extra để scripts/ chạy được ngay sau uv sync.
+    # Ingestion và bộ eval (giai đoạn retrieval nền tảng) đều xử lý dữ liệu dạng
+    # bảng; để ở dependency chính thay vì extra để scripts/ chạy được ngay sau uv sync.
     "pandas>=2.2.0",
     "httpx>=0.27.0",
     "prometheus-client>=0.26.0",
     "pyyaml>=6.0.2",
+    # Migration tooling (ADR-025) — chạy như một công cụ vận hành (uv run alembic
+    # upgrade head), không phải ORM: xem alembic/env.py và src/db.py's "raw SQL,
+    # không ORM".
+    "alembic>=1.13.0",
+    "sqlalchemy>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -36,12 +41,16 @@ dev = [
     # chỉ gọi Gemini vision qua httpx đã có sẵn.
     "pillow>=11.0.0",
 ]
-# Installed on D2 when the eval harness lands (MLflow run tracking + BM25).
+# Chưa được dùng tới: kế hoạch ban đầu ở giai đoạn retrieval nền tảng, nhưng
+# MLflow run tracking + BM25 hybrid chưa từng được xây (xem ADR-011 — đo trước cho
+# thấy không cần hybrid). Giữ lại phòng khi cần đo lại.
 eval = [
     "mlflow>=2.17.0",
     "rank-bm25>=0.2.2",
 ]
-# Installed on D2 only if EMBEDDING_BACKEND=local (pulls torch — large download).
+# Chưa được dùng tới: chỉ cần nếu EMBEDDING_BACKEND=local (pulls torch — large
+# download) — provider đã chốt là Gemini từ ADR-002, embedding local bị loại vì
+# giới hạn VRAM đo được.
 embed = [
     "sentence-transformers>=3.3.0",
 ]
