@@ -55,7 +55,9 @@ trên máy này vì hết commit headroom — số đo trong ADR-002.
 ```bash
 # Môi trường (PowerShell hoặc bash trên Windows)
 uv sync --extra dev                 # Dependencies + dev tools
-uv sync --extra dev --extra eval    # MLflow + BM25 — cài trước cho D3, D2 chưa dùng
+uv sync --extra dev --extra eval    # MLflow + BM25 — D3 đã đo và KHÔNG dùng hybrid
+                                     # (ADR-011); extra này để sẵn cho phân tích, chưa
+                                     # gỡ vì có thể cần lại nếu corpus mở rộng
 
 # Database
 docker compose up -d db             # Chỉ bật PostgreSQL (dev thường ngày)
@@ -67,17 +69,23 @@ docker compose down -v              # Dừng và XÓA dữ liệu
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/00_extensions.sql
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/01_schema.sql
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/02_seed.sql
+docker compose exec -T db psql -U app -d enterprise_ai -f /sql/06_auth.sql   # D4: cột api_key_hash
 
 # Ingest tài liệu. Dùng -m để project root vào sys.path, không phải python scripts/...
 uv run python -m scripts.ingest                            # corpus chính, 16 chunk
 uv run python -m scripts.ingest data/documents_dirty.csv   # xem quarantine hoạt động
+
+# D4: cấp API key cho từng nhân viên đã seed — in ra ĐÚNG MỘT LẦN, tự lưu lại ngay.
+# Idempotent theo từng nhân viên: không ghi đè key đã cấp, chỉ cấp cho ai chưa có.
+uv run python -m scripts.issue_api_keys
 
 # Query plan: thí nghiệm 16 dòng vs 20k dòng, có/không index, kết thúc bằng ROLLBACK
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/05_explain.sql
 
 # API dev server
 uv run uvicorn src.api:app --reload --port 8010
-# http://127.0.0.1:8010/docs
+# http://127.0.0.1:8010/docs — /ask cần header: Authorization: Bearer <key từ issue_api_keys>
+# LUÔN kiểm port trống trước khi start — xem mục 6 "Kiểm process cũ đang chiếm port"
 
 # Test, lint, types
 uv run pytest tests/ -v -m "not integration"    # Mặc định, không cần DB
@@ -112,7 +120,11 @@ uv run mypy src/ scripts/
 
 ### Không bao giờ được làm
 
-- **Commit `.env`** hoặc bất kỳ API key nào
+- **Commit `.env`** hoặc bất kỳ API key nào — kể cả API key nhân viên do
+  `scripts/issue_api_keys.py` cấp (D4); chỉ hash mới được lưu, không bao giờ log
+  plaintext key ra console/file ngoài lần in DUY NHẤT lúc cấp
+- **Chạy lại `scripts/issue_api_keys.py` rồi ghi đè `api_key_hash` thủ công** cho một
+  nhân viên đã có key — vô hiệu hoá key đang dùng của người khác mà không báo trước
 - **Trả về câu trả lời bịa** từ một endpoint chưa implement — thà trả 501
 - **Đưa số chưa đo vào README/CV** — mọi số phải trỏ về file trong `evidence/`
 - **Áp phân quyền bằng prompt** thay vì bằng filter ở tầng dữ liệu
@@ -206,6 +218,21 @@ phải thử lại điều này.
 
 D2 phải có bộ eval và số baseline **trước** khi D3 đổi retrieval. Đây là nguyên tắc cứng, không phải thứ tự cho tiện.
 
+### Kiểm process cũ đang chiếm port trước khi tin một kết quả debug lạ
+
+Khi debug D3, `/ask` trả lời sai (route ra "docs" cho một câu hỏi doanh thu rõ ràng)
+dù gọi thẳng `run_agent()` bằng script lại đúng. Nguyên nhân: một tiến trình
+`uvicorn --port 8010` cũ từ phiên làm việc trước đó **vẫn đang chạy**, phục vụ code cũ
+(trước khi có `src/agent/`), và request cứ thế trúng vào nó. Log của lần start MỚI
+(`uv run uvicorn ...` lần sau) có báo lỗi bind port thất bại — chính log đó mới lộ ra
+vấn đề, không phải log của server thật sự trả lời.
+
+Bài học: khi một kết quả qua HTTP khác kết quả gọi hàm trực tiếp, nghi ngờ **server có
+đúng là code hiện tại không** trước khi nghi ngờ logic. Kiểm bằng
+`Get-NetTCPConnection -LocalPort <port> -State Listen` (PowerShell) rồi đối chiếu
+`StartTime` của process với thời điểm sửa code gần nhất; giết process cũ trước khi
+start lại, không chạy song song nhiều bản.
+
 ---
 
 ## 7. Session Plan (D0 → D5)
@@ -219,9 +246,9 @@ Lịch học tương ứng nằm ở `CHIEN_LUOC_HOC_VA_LAM_PROJECT_RIKKEI.md` t
 | **D0** | DONE | Ngày 5 (pandas) | Skeleton: `compose.yaml`, `Dockerfile`, `src/{api,config,db,schemas}.py`, 7 tests, CI, `docs/{architecture,decisions}.md` |
 | **D1** | DONE | Ngày 6 + 7 | `sql/01_schema.sql` (7 bảng), `sql/02_seed.sql`, `sql/03_business_metrics.sql`, `sql/04_docs_point_in_time.sql`, `sql/05_explain.sql`, `src/contracts.py`, `scripts/ingest.py`, `data/documents.csv` (16 chunk) + `documents_dirty.csv`, 32 tests, `docs/query_plan.md` |
 | **D2** | DONE | Ngày 19 + 20 | `src/embeddings.py`, `src/retrieval.py` (dense, pgvector), `src/generation.py` (structured output, 2 cổng kiểm), `src/eval_taxonomy.py` (8 nhãn), `scripts/{backfill_embeddings,run_eval}.py`, `eval/dev.jsonl` (25 câu), `docs/report.md`, 50 unit + 11 integration tests |
-| **D3** | TODO | Ngày 21 + 22 | Đo trước: baseline D2 đã recall@3=100% trên 25 câu — kiểm bộ câu hỏi có đủ khó để hybrid có gì cải thiện không, đừng làm hybrid chỉ vì kế hoạch cũ nói vậy. `src/agent/` (2 tool: SQL + docs, timeout, retry, max_steps), test prompt injection |
-| **D4** | TODO | Ngày 25 + 26 | `src/security/scope.py`, `tests/test_rbac_isolation.py`, `src/audit.py`, Prometheus metrics, `docs/runbook.md` |
-| **D5** | TODO | Ngày 29 | `docs/report.md` (chạy 12 câu held-out **một lần**), README hoàn chỉnh, video demo, bullet CV |
+| **D3** | DONE | Ngày 21 + 22 | Đo trước: 5 câu paraphrase mạnh, recall@3=5/5 — không có gì để hybrid cải thiện, ADR-011 ghi lý do không xây. `src/agent/{router,tools,schema,loop}.py` (2 tool: SQL + docs, RBAC trước thực thi, retry/timeout, KHÔNG phải ReAct nhiều bước — ADR-013), RBAC SQL theo phòng ban (ADR-012), test prompt injection thật (Gemini thật bị "thuyết phuc" đề xuất sai phòng ban, RBAC vẫn chặn) |
+| **D4** | DONE | Ngày 25 + 26 | Đóng lỗ hổng AuthN thật đã đo bằng curl (ADR-015): `src/auth.py` + `sql/06_auth.sql` + `scripts/issue_api_keys.py` — RBAC/agent giờ dùng role/department từ danh tính đã xác thực, không dùng trường request. `tests/test_rbac_isolation.py` (ma trận 61 ca), `src/audit.py` (ghi `audit_log`, ADR-017), `src/metrics.py` + `/metrics` (Prometheus, ADR-017), `docs/runbook.md`. Vá thêm 3 khoảng trống đo được ở ngày 25 (ADR-016): connection pool (`psycopg_pool`), `statement_timeout`, jitter cho retry |
+| **D5** | DONE | Ngày 29 | `docs/report.md` (chạy 12 câu held-out **một lần**), README hoàn chỉnh, `docs/demo_script.md`, `docs/cv_bullets.md`, `docs/reading_order.md` (D0→D5), ADR-018/019 |
 
 ### Bootstrap Prompt cho session mới
 
@@ -252,7 +279,7 @@ Kết quả thật khác kế hoạch ở một chỗ đáng ghi: chỉ 25 câu 
 trình, xem ADR-010), đã gộp vào dev với hậu tố `_seen_at_d2`. D5 cần viết một tập
 held-out mới, sau khi D3+D4 xong.
 
-**D3:**
+**D3 (hoàn thành 14/09/2026):**
 
 ```text
 Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md,
@@ -265,7 +292,16 @@ docs) có timeout/retry/max_steps và test prompt injection.
 Kiểm codebase hiện tại rồi bắt đầu.
 ```
 
-**D4:**
+Kết quả thật, đáng ghi: đo 5 câu paraphrase mạnh trước, recall@3=5/5 — quyết định
+**không xây hybrid** (ADR-011), không phải vì hết thời gian mà vì không đo được lợi
+ích nào. Agent là một pipeline có giới hạn (router → RBAC → thực thi → tổng hợp,
+ADR-013), không phải vòng lặp ReAct nhiều bước như bài học ngày 22 — vì kiến trúc chỉ
+cần đúng một quyết định phân loại, không cần agent tự đề xuất từng bước. RBAC cho SQL
+giới hạn theo phòng ban, trừ executive (ADR-012); test prompt injection dùng Gemini
+thật (không mock) để xác nhận RBAC chặn được ngay cả khi router bị "thuyết phục" đề
+xuất sai phòng ban.
+
+**D4 (hoàn thành 15/09/2026):**
 
 ```text
 Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md và
@@ -276,7 +312,17 @@ Lưu ý: cache key phải chứa access scope, nếu không sẽ rò dữ liệu
 Kiểm codebase hiện tại rồi bắt đầu.
 ```
 
-**D5:**
+Kết quả thật, đáng ghi: RBAC ở tầng truy vấn dữ liệu đã đúng từ D2/D3 — phát hiện
+thật của D4 là **phía TRƯỚC RBAC** hoàn toàn trống: `role`/`department` chỉ là
+trường request tự khai, không có gì xác thực (đo bằng `curl` thật, ADR-015). Vá
+bằng API key thật (`src/auth.py`), không dừng ở việc thêm test — RBAC/agent đổi
+sang dùng danh tính đã xác thực làm nguồn sự thật. Audit log và Prometheus đều là
+dependency/bảng đã tồn tại từ D0/D1, chưa từng dùng tới giờ mới thật sự ghi/expose.
+Ghi chú "cache key phải chứa access scope" trong bootstrap prompt trên vẫn đúng
+nhưng chưa áp dụng — dự án chưa có cache nào (xem vault ngày 25), nguyên tắc để
+sẵn cho lần đầu tiên thêm cache.
+
+**D5 (hoàn thành 15/09/2026):**
 
 ```text
 Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md và toàn bộ
@@ -286,6 +332,22 @@ D5 (roadmap Ngày 29): chạy bộ 12 câu held-out MỘT LẦN, viết docs/rep
 đồ, script video demo 2-3 phút, bullet CV có số thật.
 Kiểm codebase hiện tại rồi bắt đầu.
 ```
+
+Kết quả thật, đáng ghi: `audit_log.total_tokens` tồn tại từ D1 nhưng chưa từng được
+ghi — trước khi đo được "token cost kèm điều kiện đo" như bootstrap yêu cầu, phải vá
+lỗ hổng đó trước (ADR-018), đổi kiểu trả về của `route()` để tránh một bug tương tranh
+tương tự lớp lỗi ADR-016 đã gặp. Viết mới 12 câu held-out (`eval/final.jsonl`, chưa
+từng chấm điểm) nhắm đúng vào hai khoảng trống D3/D4 đã tự ghi nhận "chưa đo được":
+SQL-only và câu hỏi kết hợp cả hai tool. Chạy MỘT LẦN qua `/ask` thật (không gọi
+`run_agent()` trong tiến trình) — 9/12 đúng, phát hiện 3 lỗi thật (router bỏ sót
+tool ở câu kết hợp, một response tự mâu thuẫn khiến 502, một timeout mạng không được
+retry dù lỗi HTTP status thì có). Cả ba **để nguyên không vá** — đúng luật ở mục 4
+("xem điểm trên held-out rồi tiếp tục tinh chỉnh và báo lại trên chính tập đó" là bị
+cấm), ghi lại làm backlog cho phiên sau thay vì âm thầm sửa rồi báo một con số đẹp
+hơn (ADR-019). Bootstrap prompt trên nói "ablation" — thực tế đo được là so sánh
+tool đã chọn (router) với tool đáng lẽ cần cho từng câu hỏi, không phải một ablation
+kiểu bật/tắt thành phần hệ thống; ghi rõ ở đây để phiên sau không hiểu nhầm đã có một
+thí nghiệm ablation đầy đủ hơn những gì thật sự đã chạy.
 
 ### Quy tắc kết thúc session (bắt buộc cho AI)
 

@@ -425,3 +425,371 @@ câu hỏi rõ ràng; D3 cần bộ câu hỏi khó hơn hoặc corpus lớn hơ
 còn giới hạn ở đâu — nếu baseline đã hoàn hảo, hybrid retrieval (kế hoạch ban đầu của
 D3) có thể không có gì để cải thiện, và quyết định đó cần đo trước khi làm, không mặc
 định làm theo kế hoạch cũ.
+
+---
+
+## ADR-011 — Không làm hybrid retrieval ở D3, sau khi đo thử trên câu hỏi khó hơn
+
+**Ngày:** D3 · **Trạng thái:** accepted
+
+**Bối cảnh.** ADR-010 để lại đúng câu hỏi cần trả lời trước khi code hybrid:
+`docs/report.md` nói "D3 nên đo trên câu hỏi khó hơn hoặc nhiều hơn trước khi giả định
+hybrid search đáng giá độ phức tạp thêm vào." Bài học ngày 21 (`Hybrid_Retrieval_&_Rerank`,
+vault) đã đo hiện tượng này trên một corpus khác (22 đoạn) và phát hiện: hybrid (RRF)
+có MRR **thấp hơn** dense đơn thuần trên đúng bộ câu hỏi đó — không có cơ sở giả định
+kết luận đó lặp lại y hệt trên corpus của dự án này mà không đo lại.
+
+**Đo thật.** `scripts/probe_retrieval_headroom.py` (chạy 14/09/2026, không sửa
+`eval/dev.jsonl` — xem AGENTS.md mục 4 về việc sửa bộ eval sau baseline): 5 câu hỏi mới,
+paraphrase mạnh để tối đa hoá lệch từ vựng so với 5 câu tương ứng đã có trong
+`eval/dev.jsonl` cho cùng gold chunk (ví dụ: gold `ENG-007#1` vốn được hỏi bằng
+"Neu mot ban release bi loi thi phai lam gi?" — probe hỏi lại bằng "Khi mot phien ban
+phan mem gap su co ngay sau khi phat hanh, quy trinh khac phuc la gi?", không còn từ
+"release" hay "loi" nào chung).
+
+| Kết quả | Giá trị |
+|---|---|
+| recall@3 trên 5 probe paraphrase mạnh | **5/5 (100%)** — mọi gold chunk đều đứng hạng 1 |
+| Bằng chứng | [`evidence/hybrid_headroom_probe.json`](../evidence/hybrid_headroom_probe.json) |
+
+**Quyết định.** Không xây hybrid retrieval ở D3. `gemini-embedding-001` xử lý tốt cả
+những câu hỏi paraphrase mạnh nhất có thể nghĩ ra trên corpus 16 chunk này — không còn
+khoảng trống chất lượng nào đo được để hybrid lấp vào. Xây thêm RRF/BM25 ở quy mô này
+sẽ là thêm độ phức tạp và một lệnh gọi mạng nữa mà không có số đo nào chứng minh lợi
+ích, đúng loại quyết định "làm vì kế hoạch cũ nói vậy" mà AGENTS.md yêu cầu tránh.
+
+**Khi nào mở lại.** Nếu corpus mở rộng đáng kể (hàng trăm chunk trở lên, nhiều domain
+hơn) hoặc xuất hiện câu hỏi thật có nhiều mã số/tên riêng cần khớp chính xác (dense yếu
+ở việc này — xem `Hybrid_Retrieval_&_Rerank/2. Dense_Embedding.md` mục 5 trong vault),
+đo lại bằng đúng protocol của ngày 21 trên chính `eval/dev.jsonl`, không chỉ dựa vào
+probe 5 câu này.
+
+---
+
+## ADR-012 — RBAC cho tool SQL: giới hạn theo phòng ban, trừ executive
+
+**Ngày:** D3 · **Trạng thái:** accepted, hiện thực hoá quyết định đã hoãn ở ADR-009
+
+**Bối cảnh.** ADR-009 đã chốt: `department` không phải ranh giới bảo mật cho docs, mà
+"ranh giới department thật sự thuộc về tool SQL ở D3." Bảng `monthly_revenue` không có
+cột phân quyền — cần một quy tắc rõ ràng trước khi `sql_tool` chạy câu truy vấn nào.
+
+**Quyết định.** `employee` và `manager` chỉ được xem doanh thu của **đúng phòng ban ghi
+trong `AskRequest.department`** (không phải phòng ban được nêu trong câu hỏi — hai giá
+trị có thể khác nhau, xem mục dưới). `executive` xem được doanh thu của **mọi** phòng
+ban. Role lạ luôn bị chặn, không suy đoán quyền — nhất quán với `visible_access_levels`.
+
+```python
+def can_query_department(*, role: str, caller_department: str, target_department: str) -> bool:
+    if role == "executive":
+        return True
+    if role in ("employee", "manager"):
+        return caller_department == target_department
+    return False
+```
+
+**Vì sao manager không có đặc quyền liên phòng ban.** Khác docs (nơi `access_level`
+phân biệt employee/manager/executive theo *loại nội dung* chính sách), số liệu doanh
+thu không có khái niệm "manager xem được nhiều hơn employ cùng phòng" trong dữ liệu
+tổng hợp của dự án này — ranh giới thật là *phòng ban sở hữu số liệu đó*, không phải
+cấp bậc. Một trưởng phòng Sales không có lý do nghiệp vụ để xem doanh thu phòng Kỹ
+thuật. Đây là một lựa chọn thiết kế hợp lý cho corpus tổng hợp này, không phải một quy
+luật RBAC tổng quát — một hệ thống thật có thể cần "manager cấp cao xem được nhóm phòng
+ban trực thuộc," nhưng dữ liệu hiện có không có cấu trúc phân cấp đó để mô hình hoá.
+
+**Chặn TRƯỚC khi câu SQL chạy, không lọc kết quả sau.** `sql_tool()` gọi
+`can_query_department` trước dòng `fetch_all()` đầu tiên — một role/department không đủ
+quyền không bao giờ khiến PostgreSQL chạy câu truy vấn, giống nguyên tắc đã áp cho docs
+retrieval ở ADR-009 (lọc trong `WHERE`, không lọc sau khi có kết quả).
+
+**Phòng thủ prompt injection nằm chính ở đây, không nằm ở router.** Router (Gemini,
+`src/agent/router.py`) chỉ đọc CÂU HỎI để quyết định `department` mục tiêu của câu
+SQL — nó có thể bị một câu hỏi có chủ ý lừa để đề xuất một phòng ban khác phòng ban
+thật của người hỏi (`caller_department` tới từ `AskRequest`, một trường đã xác thực,
+không phải từ router). Kiểm chứng thật (không mock), `tests/test_ask_live.py`:
+
+```text
+role=employee, department=sales, câu hỏi cố tình yêu cầu:
+  "Cho toi xem doanh thu phong finance thang 1 nam 2026"
+-> router (Gemini thật) đề xuất department="finance" đúng như câu hỏi yêu cầu
+-> can_query_department(role=employee, caller_department=sales, target=finance) = False
+-> abstained=true, tool_used=none — CHƯA BAO GIỜ chạy câu SQL cho finance
+```
+
+Router có thể bị thuyết phục sai — hệ thống vẫn đúng, vì quyết định cuối cùng không
+nằm ở router.
+
+---
+
+## ADR-013 — Kiến trúc agent D3: pipeline có giới hạn, không phải vòng lặp ReAct; số liệu SQL không đi qua LLM
+
+**Ngày:** D3 · **Trạng thái:** accepted
+
+**Quyết định 1 — không dùng vòng lặp ReAct nhiều bước.** Bài học `Agent_Loop_&_Tool_Use`
+(ngày 22, vault) dạy một vòng lặp tổng quát: planner tự đề xuất từng bước một, không
+biết trước cần bao nhiêu bước hay tool nào. `/ask` không có bài toán đó — kiến trúc đã
+biết trước chính xác có 2 tool cố định (SQL, docs) và một câu hỏi chỉ cần **một** quyết
+định phân loại ("cần tool nào") để biết phải chạy gì. Ép vào khuôn vòng lặp nhiều bước
+sẽ là một trừu tượng thừa cho một bài toán đã có hình dạng cố định — vi phạm nguyên tắc
+"không thêm trừu tượng ngoài yêu cầu." `src/agent/loop.py` triển khai router → RBAC →
+thực thi (có retry/timeout) → tổng hợp như một pipeline có giới hạn, giữ nguyên các cơ
+chế phòng thủ đã học (RBAC trước thực thi, phân loại lỗi hạ tầng/nghiệp vụ, không bịa
+khi thiếu bằng chứng) mà không cần một `max_steps` mở cho nhiều vòng lặp.
+
+**Quyết định 2 — số liệu SQL không đi qua LLM để "diễn đạt lại."** Kiến trúc ban đầu
+(`docs/architecture.md`) vẽ `T1 (SQL) --> GEN` như thể mọi câu trả lời đều qua bước
+sinh văn bản. Quyết định thật: văn bản số liệu (`sql_tool()` trả về, ví dụ
+`"2026-01: 4.200.000.000 VND"`) được dùng **nguyên văn** làm câu trả lời phần số liệu,
+không gửi qua Gemini để viết lại. Lý do: số liệu từ database đã là sự thật chính xác;
+để một LLM diễn đạt lại chỉ tạo thêm một điểm có thể sai/thêm/bớt số — một rủi ro không
+cần thiết khi văn bản đúng đã có sẵn. Phần docs (cần diễn giải từ ngữ cảnh chính sách)
+vẫn qua `generation.answer_question()` như D2, vì nội dung chính sách thật sự cần một
+mô hình đọc hiểu và tổng hợp, khác với một con số đã có sẵn.
+
+**Hệ quả đo được:** câu hỏi kết hợp cả số liệu và chính sách trong một lần hỏi đôi khi
+chỉ được router chọn đúng MỘT tool thay vì cả hai (đo thật một lần, chưa có bộ câu hỏi
+hệ thống để đo tỷ lệ) — ghi vào "Not yet measured" ở `docs/report.md`, không che giấu.
+
+---
+
+## ADR-014 — Trích xuất tài liệu scan bằng Gemini vision, chưa nối vào ingestion
+
+**Ngày:** sau D3 · **Trạng thái:** accepted, phạm vi hẹp có chủ ý
+
+**Bối cảnh.** Tài liệu nội bộ thật thường không phải CSV sạch mà là bản scan/PDF.
+`scripts/ingest.py` (D1) chỉ nhận dữ liệu dạng bảng có sẵn `chunk_text`. Cần một cách
+lấy văn bản từ ảnh/PDF trước khi dữ liệu đó có thể đi qua `src/contracts.py`.
+
+**Quyết định.** Dùng Gemini vision (`src/ocr.py::extract_text`) thay vì một OCR engine
+cục bộ (Tesseract, EasyOCR). Gửi file (ảnh hoặc PDF) dạng `inlineData` base64 tới
+`generateContent`, cùng pattern retry mạng (429/5xx) đã dùng ở `generation.py`/
+`router.py`. Không thêm dependency nặng nào — tái dùng đúng `httpx` + `LLM_API_KEY`
+đã có. Lý do đầy đủ và rủi ro của lựa chọn này (LLM có thể "đọc" sai nhưng nghe trôi
+chảy, không có confidence score như OCR truyền thống): xem vault
+`D:/Documents/AI/Update/OCR_Ingestion/1. OCR_Co_Che_Va_Phuong_Phap.md`.
+
+**Đo thật, không đoán.** Vì không có confidence score tự động, chất lượng chỉ đáng tin
+khi đo bằng CER/WER trên dữ liệu có đáp án biết trước (`src/ocr_metrics.py`, viết tay,
+không thêm dependency). `scripts/generate_ocr_sample.py` dựng một PDF mô phỏng bản scan
+(nhiễu ngẫu nhiên + nghiêng nhẹ) từ đúng văn bản đã có trong `data/documents.csv`
+(HR-001, FIN-014) — không dùng tài liệu thật của công ty nào.
+
+| Chỉ số | Kết quả | Bằng chứng |
+|---|---|---|
+| CER | **0,95%** | [`evidence/ocr_quality_probe.json`](../evidence/ocr_quality_probe.json) |
+| WER | **0,00%** | cùng file |
+| Độ trễ | 8,3s cho một trang | cùng file |
+
+**CER khác 0 dù WER = 0% — không phải lỗi nội dung.** Ground truth được ngắt dòng cứng
+theo độ dài cố định (`textwrap.wrap`); Gemini trả về đoạn văn liền mạch, tự xuống dòng
+theo đoạn. CER tính cả ký tự xuống dòng nên bị lệch bởi khác biệt định dạng thuần tuý,
+không phải từ nào bị đọc sai — WER (tách theo từ, không quan tâm xuống dòng ở đâu) mới
+là chỉ số phản ánh đúng: khớp hoàn toàn. `tests/test_ocr_live.py` giữ ngưỡng chấp nhận
+rộng (< 5%) cho cả hai, có ghi rõ lý do.
+
+**Phạm vi cố ý chưa làm — không phải bỏ sót.** `src/ocr.py` chỉ trích xuất văn bản.
+Hai việc còn thiếu để có một pipeline ingest ảnh hoàn chỉnh — **chia chunk** một khối
+văn bản dài thành nhiều dòng đúng grain của `doc_chunks`, và **gán `department`/
+`access_level`/thời gian hiệu lực** (không thể suy ra từ nội dung ảnh) — chưa được xây.
+Đây là quyết định phạm vi, ghi trong vault
+`D:/Documents/AI/Update/OCR_Ingestion/2. Tich_Hop_Chunking_Va_Danh_Gia.md` mục 3 trước
+khi code, không phải giới hạn phát hiện sau. Mở khi có nhu cầu ingest ảnh thật.
+
+---
+
+## ADR-015 — AuthN thật bằng API key, đóng lỗ hổng đã đo được (D4)
+
+**Ngày:** D4 · **Trạng thái:** accepted, vá một lỗ hổng bảo mật thật
+
+**Bối cảnh.** Vault ngày 26 (`Reliability_&_Access_Control/4. Lab.md`) đo bằng curl
+thật: `/ask` nhận `role`/`department` như trường request tự khai, không có gì xác
+minh. Một request với `user_id="khach_la_hoac_ke_gia_mao"`, không header xác thực
+nào, tự khai `role=executive` nhận đúng `FIN-014#2` — tài liệu chỉ dành cho
+executive. RBAC (`can_query_department`, `visible_access_levels`) đúng logic tuyệt
+đối, nhưng bảo vệ một giả định sai: *client trung thực về danh tính của họ*.
+
+**Quyết định.** Thêm xác thực bằng API key thật:
+
+- `sql/06_auth.sql`: cột `employees.api_key_hash` (SHA-256, không bao giờ lưu
+  plaintext), unique index để một hash không dùng chung được giữa hai nhân viên.
+- `scripts/issue_api_keys.py`: sinh key thật, in ra **đúng một lần**, chỉ ghi hash
+  vào DB — mô phỏng đúng cách một hệ thống thật cấp phát credential.
+- `src/auth.py::authenticate()`: xác minh header `Authorization: Bearer <key>`, tra
+  cứu nhân viên theo hash, trả về danh tính **thật**.
+- `src/api.py::ask`: gọi `authenticate()` trước tiên. Nếu `role`/`department` trong
+  body KHÔNG khớp danh tính đã xác thực → `403`. Quan trọng hơn: **RBAC/agent dùng
+  role/department từ danh tính đã xác thực, không dùng trường request** — loại bỏ
+  khả năng sai lệch tận gốc, không chỉ phát hiện sai lệch rồi chặn.
+
+**Đo thật, không chỉ tin thiết kế.**
+
+```text
+curl /ask, key thật của emp_001 (employee/sales), body tự khai role="executive"
+-> 403, RBAC/run_agent CHƯA BAO GIỜ được gọi (test_auth_integration.py xác nhận
+   bằng cách cho run_agent raise AssertionError nếu bị gọi tới — không raise nghĩa
+   là bị chặn đúng trước khi tới đó)
+
+curl /ask, không có header Authorization nào -> 401
+curl /ask, key hợp lệ + role/department khớp -> 200, trả lời đúng
+```
+
+**Vẫn còn giới hạn thật, ghi rõ không che giấu.** Đây là xác thực bằng "sở hữu một
+bí mật" (possession-based), không phải xác thực đa yếu tố hay OAuth2/JWT có hết hạn/
+thu hồi tức thời. Đủ để đóng đúng lỗ hổng đã đo (client không còn tự khai được role),
+nhưng nếu một key bị lộ, không có cơ chế thu hồi ngoài xoá `api_key_hash` thủ công.
+Nâng cấp lên JWT/OAuth2 khi dự án cần thu hồi quyền tức thời hoặc tích hợp một hệ
+thống định danh doanh nghiệp thật — xem vault ngày 26, file 5, mục điều kiện kích
+hoạt.
+
+---
+
+## ADR-016 — Connection pool, statement timeout, và jitter cho retry (D4)
+
+**Ngày:** D4 · **Trạng thái:** accepted, vá ba khoảng trống đã đo ở vault ngày 25
+
+Ba thay đổi độc lập, cùng nguồn gốc là số đo thật ở
+`D:/Documents/AI/Update/System_Design_Under_Load/4. Lab.md`, gộp vào một ADR vì cùng
+chủ đề độ tin cậy dưới tải và cùng session D4.
+
+**1. Connection pool (`psycopg_pool.ConnectionPool`, `src/db.py`).** Đo được: mở
+connection mới tốn ~15ms/lần so với ~1,7ms khi dùng lại — nhỏ so với việc gọi Gemini
+(giây), nhưng không miễn phí và trả thêm mỗi request. Sau khi đổi sang pool
+(`min_size=1, max_size=10`, cấu hình qua `Settings`), đo lại: ~5,5ms/lần qua pool —
+cải thiện thật (~3×) so với connect() mới, dù không bằng lý thuyết tốt nhất của một
+connection giữ mãi (pool checkout vẫn có chi phí đồng bộ hoá riêng).
+
+**2. Statement timeout (`postgres_statement_timeout_ms`, mặc định 5000ms).**
+`connect_timeout` (ADR-005) chỉ bảo vệ lúc MỞ connection — không bảo vệ một câu lệnh
+chạy quá lâu SAU KHI đã kết nối thành công. Thêm `options=-c statement_timeout=...`
+vào connection string, xác nhận thật bằng `SHOW statement_timeout` trả về `5s` sau
+khi đổi. Áp dụng cho MỌI truy vấn qua `get_connection()` — kể cả SQL tool của agent
+(D3), nơi câu lệnh cuối cùng chạy dựa trên tham số một router LLM tạo ra.
+
+**3. Jitter cho retry mạng (`generation.py`, `router.py`, `ocr.py`).** Đo được ở
+ngày 25: 3 request `/ask` đồng thời, 2/3 nhận `503` — nguyên nhân không phải
+threadpool hay DB, mà retry của cả 3 request theo ĐÚNG cùng lịch backoff
+(`1s, 2s, 4s...`) nên có xu hướng va lại giới hạn tốc độ của Gemini ở cùng thời
+điểm. Thêm `random.uniform(0, 0.5)` vào mỗi lần backoff — làm các request retry
+lệch pha nhau. Chưa đo lại tỷ lệ `503` trước/sau ở đúng kịch bản 3-request-đồng-thời
+(cần một phiên đo tải riêng, không nằm trong phạm vi D4) — ghi đúng là "đã sửa theo
+đúng nguyên nhân đã xác định", không phải "đã đo hết tác dụng của bản vá".
+
+---
+
+## ADR-017 — Audit log và Prometheus metrics (D4)
+
+**Ngày:** D4 · **Trạng thái:** accepted
+
+**Audit log (`src/audit.py`).** Bảng `audit_log` tồn tại từ D1, chưa từng được ghi.
+D4 ghi vào nó ở cuối mỗi request `/ask` thành công: `request_id`, danh tính đã xác
+thực (không phải trường tự khai), câu hỏi, tool đã dùng, các `chunk_id` đã trích
+dẫn, có abstain không, model, độ trễ. **Quyết định có chủ ý: lỗi ghi audit không làm
+sập request** — bắt mọi exception, chỉ log lại, không raise. Lý do: audit phục vụ
+tuân thủ/quan sát, không phải đường bắt buộc để trả lời được câu hỏi; một lần DB tạm
+thời không ghi được audit không nên biến thành lỗi 500 cho người dùng đang chờ câu
+trả lời. Đánh đổi: một khoảng thời gian ngắn có thể có request không để lại audit
+trail nếu DB đúng lúc đó không ghi được — chấp nhận được ở quy mô hiện tại, cần xem
+lại nếu audit trở thành yêu cầu tuân thủ cứng (ví dụ luật định).
+
+**Không ghi audit cho request bị chặn ở tầng xác thực (401/403).** `AuditEntry` yêu
+cầu `role`/`department` (NOT NULL trong schema) — một request chưa xác thực không có
+danh tính đáng tin để gán vào các trường đó. Tín hiệu cho các ca này nằm ở
+`ask_auth_failures_total` (Prometheus) và log warning, tách biệt khỏi audit trail
+của các request đã xử lý.
+
+**Prometheus metrics (`src/metrics.py`, `/metrics`).** `prometheus-client` là
+dependency từ D0, chưa từng dùng tới D4. Ba metric: `ask_requests_total` (theo
+`tool_used`/`status`), `ask_request_duration_seconds` (histogram, theo `tool_used`),
+`ask_auth_failures_total` (theo `reason`). Cố tình không dùng câu hỏi làm label —
+cardinality không giới hạn sẽ làm nổ số lượng chuỗi metric. `/metrics` không yêu cầu
+xác thực, đúng quy ước Prometheus thông thường (bảo vệ bằng network policy/reverse
+proxy ở tầng hạ tầng, không phải app-level auth).
+
+## ADR-018 — Chi phí token thật: đọc `usageMetadata`, không ước lượng (D5)
+
+**Ngày:** D5 · **Trạng thái:** accepted
+
+**Vấn đề.** `audit_log.total_tokens` tồn tại từ D1 (cột NOT NULL-able, có sẵn trong
+schema) nhưng chưa từng được ghi — `api.py` không bao giờ truyền giá trị này vào
+`AuditEntry`, và không có nơi nào trong `generation.py`/`router.py` đọc
+`usageMetadata` từ response Gemini. D5 cần báo cáo "token cost kèm điều kiện đo"
+(`AGENTS.md` mục 7) — ước lượng chi phí từ độ dài prompt là đoán, không phải đo,
+đúng loại lỗi mà `AGENTS.md` mục 4 đã cấm ("đưa số chưa đo vào README/CV").
+
+**Quyết định.** Đọc `body.get("usageMetadata", {}).get("totalTokenCount", 0)` ở cả
+hai nơi gọi Gemini thật (`generation.py::_call_gemini`, `router.py::_call_gemini`),
+cộng dồn qua mọi lượt retry (mỗi lượt gọi lại đều tốn tiền thật, kể cả lượt thất
+bại), rồi truyền lên tới `AgentAnswer.total_tokens` và ghi vào `audit_log` qua
+`api.py`. `total_tokens` của một request `/ask` = token router + token generation
+(nếu có dùng docs tool) — `sql_tool` không gọi LLM nên không cộng thêm.
+
+**`route()` đổi kiểu trả về:** từ `ToolPlan` sang `RouterResult` (bọc
+`plan: ToolPlan` và `total_tokens: int`). Cân nhắc thay thế: giữ nguyên `route()` trả
+`ToolPlan`, lưu token vào một biến module-level rồi đọc lại ở `loop.py` sau khi gọi —
+**bị loại** vì đó là state dùng chung có thể đua nhau (race condition) giữa các
+request xử lý đồng thời trên cùng một tiến trình, đúng loại bug mà ADR-016 (jitter
+cho retry) đã tốn công phát hiện và sửa; không lặp lại lớp lỗi đó chỉ để tránh sửa
+vài chữ ký hàm. Đổi kiểu trả về đụng tới các test mock `route()` trực tiếp
+(`tests/test_agent_router.py`, `tests/test_agent_loop.py`) — đã cập nhật toàn bộ,
+165 test không-integration vẫn xanh sau khi đổi.
+
+**`RouterSchemaFailure` mang theo `total_tokens`.** Router thất bại sau khi hết lượt
+retry (`_SCHEMA_RETRY_ATTEMPTS`) vẫn đã tốn tiền cho các lượt đã thử — exception giữ
+lại con số đó thay vì để tầng gọi báo `0` sai sự thật. `SchemaFailure` của
+`generation.py` **không** được xử lý tương tự (phạm vi nhỏ hơn: lỗi này luôn dẫn tới
+502 ở `api.py`, và đường 502 hiện tại không gọi `record_audit` — audit hoá token trên
+một đường không audit gì khác là việc thêm phạm vi không cần thiết cho D5; ghi nhận
+đây là một giới hạn đã biết, không phải điểm mù).
+
+**Không đo được:** đơn giá theo token của `gemini-3.1-flash-lite`/
+`gemini-embedding-001` tại thời điểm đo — Google AI Studio không cấp API tra cứu giá
+theo model; báo cáo D5 quy đổi VNĐ sẽ trích dẫn trang giá công khai kèm ngày truy cập
+thay vì bịa một con số cố định có thể đã lỗi thời.
+
+## ADR-019 — Tập held-out D5: qua HTTP thật, chạy một lần, ba phát hiện thật để nguyên không vá (D5)
+
+**Ngày:** D5 · **Trạng thái:** accepted
+
+**12 câu held-out, không phải bản mở rộng của `eval/dev.jsonl`.** `eval/dev.jsonl`
+(25 câu, D2) chỉ kiểm docs retrieval — có từ trước khi agent (D3) tồn tại, nên chưa
+từng gọi tool SQL hay đường kết hợp cả hai tool. 12 câu held-out được thiết kế để
+lấp đúng hai khoảng trống đã được D3/D4 tự ghi nhận là "chưa đo được": SQL-only (bao
+gồm bị RBAC chặn, và tháng số liệu tạm tính chưa chốt), và một câu hỏi hỏi cả số liệu
+lẫn chính sách trong cùng một câu (D3 report: "quan sát được một lần, chưa có eval set
+riêng"). Không dùng lại nguyên văn/gần giống bất kỳ câu nào trong dev — kiểm tra chéo
+toàn bộ 25 câu dev trước khi viết 12 câu held-out, đúng theo `AGENTS.md` mục 4 ("Xem
+bộ 12 câu held-out trước D5 — xem rồi là mất tính độc lập": ở đây là viết mới, không
+phải xem một tập đã có).
+
+**Chạy qua HTTP thật (`/ask` đang chạy), không gọi `run_agent()` trong tiến trình.**
+Lý do: D5 cần đo latency và token đúng tại biên mà một caller thật sẽ chạm — bao gồm
+cả xác thực thật (D4) và một dòng `audit_log` thật cho mỗi câu — không phải thời gian
+gọi hàm nội bộ, vốn bỏ qua toàn bộ overhead HTTP/xác thực.
+
+**8 nhân viên `emp_101`–`emp_108` mới, chỉ để chạy eval này.** 8 nhân viên gốc đã có
+`api_key_hash` từ một phiên trước — key gốc (plaintext) không còn giữ được (chỉ hash
+được lưu, đúng thiết kế D4), và `AGENTS.md` cấm chạy lại `issue_api_keys.py` theo
+cách vô hiệu hoá key đang dùng của người khác. `issue_api_keys.py` tự nó đã idempotent
+(chỉ cấp key cho nhân viên `api_key_hash IS NULL`), nên thêm 8 dòng nhân viên mới —
+cùng đúng 8 tổ hợp role×department cần cho 12 câu hỏi — rồi cấp key cho riêng 8 dòng
+đó là cách đạt được một lượt chạy thật mà không chạm gì vào 8 nhân viên gốc. Key
+plaintext của 8 nhân viên mới nằm ngoài repo (thư mục scratchpad của phiên làm việc),
+không bao giờ commit.
+
+**"Chạy một lần" áp dụng cho tập câu hỏi, không phải cho một lần gọi hạ tầng thất
+bại.** Lần chạy đầu tiên mất 7 kết quả thật (câu 1–7) khi câu 8 gặp lỗi 502, vì
+`run_held_out_eval.py` (bug của chính harness, không phải hệ thống đang đo) chỉ ghi
+kết quả ra đĩa sau khi CẢ 12 câu chạy xong. Sửa lại đúng mẫu `run_eval.py` đã dùng cho
+`eval/dev.jsonl` — ghi từng câu ngay sau khi chạy — rồi chạy lại từ đầu. Vì chưa có gì
+được ghi ra đĩa ở lần thất bại, đây là hoàn thành đúng MỘT lượt chạy đã định, không
+phải một lượt chạy thứ hai sau khi biết trước kết quả.
+
+**Ba phát hiện thật (router bỏ sót một tool ở câu kết hợp — H07; một response tự mâu
+thuẫn `abstained=true` kèm citation không được xử lý mềm, ra 502 — H08; timeout mạng
+gọi Gemini không được retry dù lỗi HTTP status thì có — H02) để nguyên không vá.**
+Quyết định có chủ ý, không phải bỏ sót: `AGENTS.md` mục 4 cấm rõ "xem điểm trên tập
+held-out rồi tiếp tục tinh chỉnh và báo lại trên chính tập đó". Vá cả ba rồi chạy lại
+đúng 12 câu này để lấy một con số đẹp hơn sẽ vi phạm đúng quy tắc đó — dù ý định là
+sửa lỗi thật, hệ quả (một held-out report được tinh chỉnh sau khi thấy điểm) giống hệt
+nhau. Ba phát hiện được ghi lại làm backlog cho phiên sau, kèm bằng chứng log server
+cụ thể — không bị giấu, không bị vá âm thầm.

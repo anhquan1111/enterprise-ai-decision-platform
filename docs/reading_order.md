@@ -1,20 +1,25 @@
-# Thứ tự đọc để hiểu hết D0 + D1
+# Thứ tự đọc để hiểu toàn bộ dự án (D0 → D5)
 
-Đọc theo thứ tự này thì mỗi file chỉ dùng kiến thức từ các file trước nó. Tổng khoảng
-**90 phút**. Cột bên phải ghi chỗ tương ứng trong tài liệu học, để thấy code này đến từ
-cơ chế nào.
+Đọc theo thứ tự này thì mỗi file chỉ dùng kiến thức từ các file trước nó. Chặng 1–7
+(D0+D1) mất khoảng **90 phút**; toàn bộ D0→D5 mất khoảng **170 phút** — không cần đọc
+một mạch, dừng ở cuối bất kỳ chặng nào cũng để lại một hiểu biết trọn vẹn về đúng session
+đó. Cột bên phải ghi chỗ tương ứng trong tài liệu học, để thấy code này đến từ cơ chế nào.
 
 Vault tài liệu: `D:\Documents\AI\Update\`.
 
 ## Trước khi đọc: bật hệ thống lên
 
-Đọc code mà không thấy nó chạy thì khó nhớ. Chạy bốn lệnh này trước, mỗi lệnh ~10 giây:
+Đọc code mà không thấy nó chạy thì khó nhớ. Chạy các lệnh này trước (lần đầu, đủ cho
+D0→D3; hai lệnh cuối chỉ cần cho D4+):
 
 ```powershell
 docker compose up -d db
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/01_schema.sql
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/02_seed.sql
 uv run python -m scripts.ingest
+uv run python -m scripts.backfill_embeddings
+docker compose exec -T db psql -U app -d enterprise_ai -f /sql/06_auth.sql
+uv run python -m scripts.issue_api_keys       # in ra key MỘT LẦN — tự lưu lại nếu muốn thử /ask
 ```
 
 Giữ terminal đó mở. Mỗi khi đọc tới một file SQL, chạy thử câu trong đó.
@@ -155,7 +160,7 @@ git log --oneline
 
 ---
 
-## Ba câu tự kiểm sau khi đọc xong
+## Ba câu tự kiểm sau khi đọc xong D0 + D1
 
 Trả lời được cả ba là đã hiểu D0 + D1. Trả lời không trôi câu nào thì quay lại đúng
 chặng đó, không đọc lại từ đầu.
@@ -168,3 +173,96 @@ chặng đó, không đọc lại từ đầu.
 3. Một câu hỏi ở thời điểm `2026-06-01` không được thấy tài liệu `SAL-009`. Ba điều
    kiện trong `04_docs_point_in_time.sql`, điều kiện nào loại nó, và nếu bỏ điều kiện
    đó thì hệ thống sai theo kiểu gì?
+
+**Tiếp theo:** phần dưới đây đi tiếp từ D2 tới D5 — mỗi chặng vẫn chỉ cần kiến thức
+từ các chặng trước nó (kể cả D0+D1 ở trên).
+
+---
+
+## Chặng 8 — D2: retrieval thật và cổng chất lượng câu trả lời (25 phút)
+
+| # | File | Câu hỏi được trả lời | Tương ứng tài liệu |
+|---:|---|---|---|
+| 21 | [src/embeddings.py](../src/embeddings.py) | Một hàm `embed()` dùng chung cho cả ingest lẫn query, khác nhau ở `task_type` | Ngày 19/20 |
+| 22 | [src/retrieval.py](../src/retrieval.py) | Phạm vi quyền + point-in-time lọc TRƯỚC khi tính cosine, không phải sau | RAG_Evaluation |
+| 23 | [src/generation.py](../src/generation.py) | Hai cổng tách biệt: schema (Pydantic) rồi mới tới bằng chứng (`check_grounding`) — không trộn làm một | LLM_Inference_&_Structured_Output |
+| 24 | [src/eval_taxonomy.py](../src/eval_taxonomy.py) | 8 nhãn lỗi, và vì sao thứ tự kiểm (quyền → retrieval → generation) không được đảo | Ngày 20 |
+| 25 | [eval/dev.jsonl](../eval/dev.jsonl) rồi [docs/report.md](report.md) mục D2 | 25 câu hỏi thật trông như thế nào, và hai lỗi đo lường đã xảy ra thật (rubric bug, bug dấu tiếng Việt) | — |
+
+Điểm cần nắm: recall@3 = 100% trên tập dev **không có nghĩa** retrieval luôn đúng —
+đọc kỹ đoạn so sánh với bài học ngày 20 (cùng một câu hỏi, corpus khác, TF-IDF xếp hạng
+5 nhưng dense embedding xếp hạng 1) để thấy baseline này chỉ đúng trong đúng điều kiện
+đã ghi, không phải một tuyên bố chung.
+
+Chạy thử (không tốn quota — đọc kết quả đã có sẵn):
+
+```powershell
+uv run python -m scripts.run_eval --report
+```
+
+## Chặng 9 — D3: agent, RBAC cho SQL, quyết định không xây hybrid (25 phút)
+
+| # | File | Câu hỏi được trả lời | Tương ứng tài liệu |
+|---:|---|---|---|
+| 26 | [src/scope.py](../src/scope.py) mục `can_query_department` | Ranh giới quyền cho SQL khác ranh giới cho docs (ADR-009) như thế nào | Ngày 21 |
+| 27 | [src/agent/schema.py](../src/agent/schema.py) | Router chỉ trả về đúng hình dạng gì (`ToolPlan`, `SqlArgs`) | Agent_Loop_&_Tool_Use |
+| 28 | [src/agent/router.py](../src/agent/router.py) | Một quyết định phân loại DUY NHẤT — vì sao đây không phải vòng lặp ReAct | Agent_Loop_&_Tool_Use |
+| 29 | [src/agent/tools.py](../src/agent/tools.py) | RBAC kiểm TRƯỚC khi câu SQL chạy, không phải lọc kết quả sau | ADR-012 |
+| 30 | [src/agent/loop.py](../src/agent/loop.py) | `route → RBAC → thực thi (retry) → tổng hợp`; vì sao số liệu SQL không bao giờ qua LLM | ADR-013 |
+| 31 | [docs/report.md](report.md) mục D3 | Đo trước khi xây: 5 câu paraphrase khó, recall@3 vẫn 5/5 → quyết định không làm hybrid | ADR-011 |
+
+Dừng lại ở `loop.py::run_agent` — đọc kỹ khối `try/except RouterSchemaFailure` và so
+với `_summarize()`: đây là nơi một router bị "thuyết phục" sai vẫn không vượt qua được
+RBAC, vì RBAC dùng `role`/`department` của người gọi, không dùng văn bản câu hỏi.
+`tests/test_agent_loop.py::test_router_fooled_into_cross_department_request_is_still_blocked`
+là bài kiểm chứng trực tiếp cho đúng khẳng định này.
+
+## Chặng 10 — D4: xác thực thật, audit, độ tin cậy đo được (25 phút)
+
+| # | File | Câu hỏi được trả lời | Tương ứng tài liệu |
+|---:|---|---|---|
+| 32 | [sql/06_auth.sql](../sql/06_auth.sql) | `api_key_hash` được thêm vào `employees` như thế nào, vì sao chỉ lưu hash | ADR-015 |
+| 33 | [src/auth.py](../src/auth.py) | `Authorization: Bearer <key>` → nhân viên thật, hay 401 | ADR-015 |
+| 34 | [src/api.py](../src/api.py) mục `/ask` | Thứ tự bắt buộc: xác thực → đối chiếu role/department → agent → audit | ADR-015/017 |
+| 35 | [src/audit.py](../src/audit.py) | Vì sao lỗi ghi audit không được làm sập request đang trả lời | ADR-017 |
+| 36 | [src/metrics.py](../src/metrics.py) | Ba metric Prometheus, vì sao câu hỏi không được dùng làm label | ADR-017 |
+| 37 | [tests/test_rbac_isolation.py](../tests/test_rbac_isolation.py) | Ma trận 61 ca — đọc tên test là đọc bản tóm tắt toàn bộ ranh giới quyền | — |
+| 38 | [docs/report.md](report.md) mục D4 | Lỗ hổng thật đã đo bằng `curl` (trước/sau khi vá), và 3 khoảng trống độ tin cậy đã sửa (pool, statement timeout, jitter) | ADR-015/016 |
+
+Thử ngay — request giả mạo role bị chặn thật:
+
+```powershell
+uv run uvicorn src.api:app --port 8010
+# rồi (không có Authorization header):
+curl -X POST http://127.0.0.1:8010/ask -H "Content-Type: application/json" -d '{"user_id":"x","role":"executive","department":"finance","question":"test"}'
+# -> 401, agent chưa từng được gọi
+```
+
+## Chặng 11 — D5: báo cáo cuối trên tập held-out, và ba lỗi để nguyên không vá (20 phút)
+
+| # | File | Câu hỏi được trả lời | Tương ứng tài liệu |
+|---:|---|---|---|
+| 39 | [eval/final.jsonl](../eval/final.jsonl) | 12 câu held-out thật trông như thế nào, và vì sao chúng khác hẳn 25 câu dev (SQL, kết hợp tool) | ADR-019 |
+| 40 | [scripts/run_held_out_eval.py](../scripts/run_held_out_eval.py) | Vì sao chạy qua HTTP thật thay vì gọi `run_agent()` trong tiến trình; vì sao ghi kết quả từng câu một | ADR-019 |
+| 41 | [docs/report.md](report.md) mục D5 | Kết quả thật (9/12), và ba phát hiện thật (router bỏ sót tool, response tự mâu thuẫn, timeout không được retry) | ADR-018/019 |
+| 42 | [docs/decisions.md](decisions.md) ADR-018, ADR-019 | Vì sao đo token cost cần đổi kiểu trả về của `route()`, và vì sao ba lỗi phát hiện được KHÔNG bị vá rồi chạy lại | — |
+| 43 | [docs/demo_script.md](demo_script.md), [docs/cv_bullets.md](cv_bullets.md) | Kịch bản demo 2-3 phút, và bullet CV — cả hai chỉ dùng số đã có trong `evidence/`/`docs/report.md` | Evidence_Packaging_&_Interview_Prep |
+
+Điểm quan trọng nhất của cả chặng này, dễ bị đọc lướt qua: D5 tìm ra ba lỗi thật rồi
+**cố tình không sửa**. Đọc kỹ đoạn giải thích trong ADR-019 — đây không phải một
+session làm dở, mà là hệ quả trực tiếp của đúng nguyên tắc "held-out chỉ chạy một lần"
+mà `AGENTS.md` mục 4 đã đặt ra từ trước khi D5 bắt đầu.
+
+---
+
+## Ba câu tự kiểm sau khi đọc xong D2 → D5
+
+1. Một câu hỏi vừa hỏi số liệu doanh thu vừa hỏi chính sách liên quan trong cùng một
+   câu. Router THƯỜNG chọn tool nào, và tại sao đây là một phát hiện được đo hai lần
+   độc lập (D3 và D5) chứ không phải một lần đoán?
+2. Một request có `Authorization` header hợp lệ nhưng `role` trong body không khớp
+   role thật của key đó. Request đi qua bao nhiêu bước kiểm trước khi tới `run_agent()`,
+   và dừng ở bước nào?
+3. Tập held-out D5 tìm ra một response tự mâu thuẫn (`abstained=true` kèm citation)
+   khiến request 502. Vì sao D5 không sửa lỗi này rồi chạy lại đúng 12 câu đó để lấy
+   một con số tốt hơn — điều đó vi phạm đúng nguyên tắc nào?
