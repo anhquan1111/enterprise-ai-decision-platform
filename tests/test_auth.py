@@ -11,6 +11,9 @@ import pytest
 
 from src import auth as auth_module
 from src.auth import AuthenticationError, authenticate
+from src.config import get_settings
+from src.identity import AuthenticatedEmployee
+from src.jwt_auth import issue_token
 
 
 def make_row(
@@ -69,3 +72,48 @@ def test_key_is_hashed_before_querying_never_sent_as_plaintext(
     expected_hash = hashlib.sha256(b"chuoi-key-ro-rang").hexdigest()
     assert captured["hash"] == expected_hash
     assert "chuoi-key-ro-rang" not in captured.values()
+
+
+def test_jwt_bearer_token_authenticates_via_jwt_path_not_db(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-028 bước 3/3: một JWT hợp lệ phải xác thực được KHÔNG qua fetch_one —
+    authenticate() phân biệt bằng hình dạng token (JWT luôn có đúng 2 dấu '.'),
+    không thử API key trước rồi mới thử JWT."""
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-du-dai-de-qua-canh-bao-do-dai")
+    get_settings.cache_clear()
+
+    def fail_if_called(*a: object, **kw: object) -> None:
+        raise AssertionError("khong duoc goi fetch_one khi token la JWT")
+
+    monkeypatch.setattr(auth_module, "fetch_one", fail_if_called)
+
+    token = issue_token(
+        AuthenticatedEmployee(employee_id="emp_042", role="manager", department="hr")
+    )
+
+    employee = authenticate(f"Bearer {token}")
+
+    assert employee.employee_id == "emp_042"
+    assert employee.role == "manager"
+    assert employee.department == "hr"
+
+
+def test_malformed_jwt_shaped_token_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Token có đúng 2 dấu '.' (giống hình dạng JWT) nhưng nội dung rác phải bị từ
+    chối rõ ràng, không rơi nhầm sang đường tra API key."""
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-du-dai-de-qua-canh-bao-do-dai")
+    get_settings.cache_clear()
+
+    with pytest.raises(AuthenticationError):
+        authenticate("Bearer khong.phai.jwt")
+
+
+def test_api_key_without_dots_still_uses_db_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Xác nhận API key (không có dấu '.') vẫn đi đúng đường tra DB cũ, không bị
+    route nhầm sang xác minh JWT."""
+    monkeypatch.setattr(auth_module, "fetch_one", lambda *a, **kw: make_row())
+
+    employee = authenticate("Bearer mot-api-key-binh-thuong-khong-co-dau-cham")
+
+    assert employee.employee_id == "emp_001"

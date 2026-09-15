@@ -310,8 +310,12 @@ purpose; see ADR-024.
 - A raw network timeout talking to Gemini (`httpx.TimeoutException`/`ConnectError`)
   used to skip the retry loop entirely — fixed to retry the same as an HTTP 503.
   See ADR-020.
-- AuthN is a possession-based API key, not JWT/OAuth2 — no built-in expiry or
-  instant revocation, only manual deletion of `api_key_hash`. See ADR-015.
+- AuthN was a possession-based API key with no expiry, only manual deletion of
+  `api_key_hash` for revocation (ADR-015). **`POST /auth/token` now exchanges a
+  valid API key for a short-lived JWT** (default 60 min, `HS256`,
+  `authenticate()` accepts either) — the API key itself still works directly on
+  `/ask`, unchanged; JWT adds automatic expiry, not revocation (see ADR-028 for
+  what would still be needed for that).
 - Retry jitter was added for the exact mechanism measured causing concurrent
   `503`s (ADR-016) and has since been re-measured under real concurrent load
   (8 trials × 3 concurrent requests, both with and without jitter) — no

@@ -1261,9 +1261,10 @@ từng điều kiện tách biệt ở tầng schema thay vì tin vào hướng 
 — nhưng đây là một thay đổi để dành, không làm trong ADR này vì chưa có lỗi tái
 hiện được để xác nhận nó thật sự cần thiết.
 
-## ADR-028 — JWT, bước 1/3: tiện ích cấp/xác minh, chưa đụng route nào
+## ADR-028 — Thêm JWT song song API key, chia 3 bước để mỗi commit an toàn riêng
 
-**Ngày:** sau báo cáo cuối · **Trạng thái:** accepted, bước 1/3
+**Ngày:** sau báo cáo cuối · **Trạng thái:** accepted, đủ cả 3 bước — API key vẫn
+hoạt động song song JWT trong suốt, không bước nào làm gián đoạn
 
 **Bối cảnh.** ADR-015 tự ghi rõ điều kiện nâng cấp: "Nâng cấp lên JWT/OAuth2 khi dự
 án cần thu hồi quyền tức thời hoặc tích hợp một hệ thống định danh doanh nghiệp
@@ -1338,3 +1339,36 @@ cách thêm ba dòng `JWT_SECRET_KEY`/`JWT_ALGORITHM`/`JWT_EXPIRY_MINUTES` vào
 có. Xác nhận lại bằng request thật (không phải test mock): `curl -X POST
 /auth/token` trả token, decode payload xác nhận đúng
 `sub`/`role`/`department`/`exp-iat=3600s`.
+
+**Bước 3/3: `authenticate()` chấp nhận cả API key lẫn JWT, `/ask` không đổi route
+nào.** `src/auth.py::authenticate()` giờ phân biệt hai kiểu Bearer token bằng
+HÌNH DẠNG trước khi thử xác minh: một JWT luôn là đúng ba đoạn base64url cách nhau
+bởi hai dấu `.`; một API key (`secrets.token_urlsafe(32)`) không bao giờ chứa ký
+tự `.` trong bảng chữ cái base64url của nó. `token.count(".") == 2` → đi đường
+`jwt_auth.verify_token()`; ngược lại → đi đường tra `employees.api_key_hash` như
+cũ. Chọn kiểm hình dạng trước, không thử-cả-hai-rồi-bắt-lỗi: hai đường lỗi khác
+nhau ("token JWT hỏng" so với "API key sai") rõ ràng hơn cho người debug, và tránh
+tốn một lượt gọi DB hoặc một lượt giải mã JWT không cần thiết mỗi lần.
+
+**Vòng import: tách `AuthenticatedEmployee`/`AuthenticationError` ra
+`src/identity.py`.** Bước 1/3 đã để `jwt_auth.py` import hai kiểu này từ
+`auth.py`. Bước 3/3 cần `auth.py` import ngược lại `jwt_auth.py` (gọi
+`verify_token()`) — hai module import lẫn nhau vỡ ngay lúc import. Giải pháp: một
+module trung lập (`src/identity.py`, không phụ thuộc DB/JWT/gì khác) giữ hai kiểu
+dữ liệu dùng chung, cả `auth.py` và `jwt_auth.py` cùng import từ đó, không import
+lẫn nhau nữa. `auth.py` re-export lại hai tên này (`__all__`) nên
+`from src.auth import AuthenticatedEmployee, AuthenticationError` ở mọi nơi khác
+(`api.py`, các file test cũ) không cần sửa gì.
+
+**Test mới (`tests/test_auth.py`, 3 ca): một JWT hợp lệ xác thực được và KHÔNG gọi
+`fetch_one`** (spy raise nếu bị gọi — chứng minh đường JWT thật sự tách biệt khỏi
+đường DB, không phải "thử API key trước, JWT chỉ là fallback tình cờ đúng"),
+**token có đúng hình dạng JWT (2 dấu `.`) nhưng nội dung rác bị từ chối rõ ràng**,
+và **API key thường (không dấu `.`) vẫn đi đúng đường tra DB cũ**. 189 test
+không-integration xanh.
+
+**Đo thật qua container, không chỉ tin test mock.** `curl -X POST /auth/token`
+bằng API key thật → nhận JWT → `curl -X POST /ask` bằng chính JWT đó (không kèm
+API key nào) → trả lời đúng, có trích dẫn (`HR-001#0`, "12 ngày phép"). Gọi lại
+`/ask` bằng API key CŨ ngay sau đó → vẫn `200` — xác nhận cả ba bước không có bước
+nào làm API key hiện tại ngừng hoạt động, đúng cam kết đặt ra từ đầu ADR này.

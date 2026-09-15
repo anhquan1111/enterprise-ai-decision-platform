@@ -1,6 +1,7 @@
-"""Cấp và xác minh JWT — bước 1/3 của việc thêm JWT (ADR-028): chỉ tiện ích, chưa
-đụng route nào. `/ask` vẫn xác thực bằng API key y hệt trước; hàm ở đây chưa được
-gọi từ đâu cả.
+"""Cấp và xác minh JWT (ADR-028). Từ bước 3/3, `auth.py::authenticate()` gọi
+`verify_token()` ở đây để chấp nhận cả JWT lẫn API key — trước đó (bước 1-2/3),
+`/ask` vẫn xác thực bằng API key y hệt cũ, các hàm ở đây chỉ được gọi từ
+`POST /auth/token`.
 
 Dùng HS256 (đối xứng) chứ không phải RS256: chỉ một service vừa cấp vừa xác minh
 token, không có bên thứ ba nào cần xác minh độc lập — bất đối xứng chỉ có ích khi
@@ -11,14 +12,19 @@ Luôn truyền ``algorithms=[...]`` tường minh khi decode, không bao giờ �
 đoán thuật toán từ header của token — đây là phòng vệ chống tấn công "algorithm
 confusion" (kẻ tấn công tự ký một token bằng thuật toán khác, ví dụ ``none``, hòng
 qua được bước xác minh).
+
+Import ``AuthenticatedEmployee``/``AuthenticationError`` từ ``src.identity``, KHÔNG
+phải từ ``src.auth`` — ``auth.py`` cần import ngược lại module này
+(``verify_token``) để hỗ trợ cả hai kiểu xác thực, nên lấy hai kiểu dữ liệu dùng
+chung từ một module trung lập là cách duy nhất tránh vòng import.
 """
 
 from datetime import UTC, datetime, timedelta
 
 import jwt
 
-from src.auth import AuthenticatedEmployee, AuthenticationError
 from src.config import get_settings
+from src.identity import AuthenticatedEmployee, AuthenticationError
 
 
 def _require_secret() -> str:
