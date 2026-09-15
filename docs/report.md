@@ -269,15 +269,43 @@ ask_auth_failures_total{reason="role_mismatch"} 1.0
 |---|---|---|
 | New DB connection per request: ~15ms/call vs ~1.7ms reused | `psycopg_pool.ConnectionPool` in `src/db.py` | ~5.5ms/call through the pool — real improvement (~3×), not the theoretical best (pool checkout has its own small cost) |
 | No `statement_timeout` — only connection has a timeout (ADR-005) | `postgres_statement_timeout_ms=5000`, wired into `database_url` | `SHOW statement_timeout` confirms `5s` on a real connection |
-| 2/3 concurrent `/ask` requests got `503` — root cause: retry backoff shared an identical schedule across requests, colliding on Gemini's rate limit again | Added `random.uniform(0, 0.5)` jitter to backoff in `generation.py`, `router.py`, `ocr.py` | Fix targets the exact mechanism identified; **not yet re-measured** under the same 3-concurrent-request scenario (ADR-016) |
+| 2/3 concurrent `/ask` requests got `503` — root cause: retry backoff shared an identical schedule across requests, colliding on Gemini's rate limit again | Added `random.uniform(0, 0.5)` jitter to backoff in `generation.py`, `router.py`, `ocr.py` | Fix targets the exact mechanism identified; **re-measured 15/09/2026 under real concurrent load — see below.** |
 
 ### Not yet measured
 
-- Retry jitter's actual effect on the concurrent-503 rate (ADR-016) — the original
-  scenario has not been re-run post-fix.
 - Connection pool behaviour under real concurrent load (only measured sequentially).
 - AuthN is possession-based (API key), not JWT/OAuth2 — no expiry, no instant
   revocation. See ADR-015 for upgrade conditions.
+
+### Retry jitter under real concurrent load — re-measured, no benefit detected
+
+**Measured:** 15/09/2026. **Method:** `scripts/probe_retry_jitter_load.py` — 3
+concurrent calls to `run_agent()` in-process (the retry/jitter mechanism under
+test, not the full HTTP/auth path), 8 trials per condition, jitter toggled via
+monkeypatch on the module-level constant, **both conditions run back-to-back in one
+session** so time-varying external congestion affects them roughly equally. Raw
+data: `evidence/retry_jitter_load_probe.json`. Full writeup: ADR-026.
+
+| Condition | Failure rate |
+|---|---:|
+| With jitter (as shipped, ADR-016) | 23/24 (95.8%) |
+| Without jitter (monkeypatched to 0) | 20/24 (83.3%) |
+
+**No measurable benefit from jitter detected — if anything, slightly worse, but not
+meaningfully so.** Both rates are dominated by real, severe Gemini congestion during
+this session (visible throughout this project's `docs/decisions.md` ADR-024 and the
+round-2 held-out run) — individual trials ranged from 0/3 to 3/3 failures in *both*
+conditions, noise far larger than the 3-call gap between the two rates. This is not
+evidence that ADR-016's jitter fix was wrong: jitter specifically prevents
+*synchronized* retry collisions (many clients retrying at the exact same instant),
+a real, distinct mechanism from *sustained* congestion that outlasts the entire
+retry budget. At today's congestion level, the retry budget itself
+(3 attempts, ≤ ~7s exponential backoff + ≤ 1.5s jitter, ≈ 8.5s total) is
+consistently too short to ride out an outage that runs tens of seconds to minutes —
+jitter has nothing left to help with once every attempt in the budget lands inside
+the same outage window. Left as an open finding, not fixed further in this pass: a
+larger retry budget or an adaptive backoff strategy would address a *different* gap
+(retry budget vs. outage duration) than the one ADR-016 closed.
 
 ## Final report on a fresh held-out set
 

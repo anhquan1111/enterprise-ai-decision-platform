@@ -262,23 +262,24 @@ possible with existing dev questions, still resolved with 100% recall@3. Hybrid 
 not built — see ADR-011 and
 [`evidence/hybrid_headroom_probe.json`](evidence/hybrid_headroom_probe.json).
 
-### Held-out set, run once
+### Held-out set, round 2, run once
 
 | Metric | Result |
 |---|---|
-| Held-out questions | 12 (`eval/final.jsonl`), genuinely new — see ADR-019 |
-| Correct | 9/12 |
-| Infrastructure errors (502/503, retried by the app, still failed) | 2/12 |
-| Router picked the wrong tool for a combined sql+docs question | 1/12 |
-| Latency p50 / p95 (real HTTP, 10 completed requests) | 2,807 ms / 7,848 ms |
-| Token cost, real (`audit_log.total_tokens`, first real numbers ever recorded here) | 618.9 mean / request |
+| Held-out questions | 12 (`eval/final.jsonl`), genuinely new — see ADR-024 |
+| Correct | 11/12 |
+| Infrastructure errors in the final state | 0/12 (a real `embeddings.py` retry gap was found and fixed mid-run — see ADR-024) |
+| Router picked the wrong tool for a combined sql+docs question | 1/12 (recurrence of round 1's finding, after a fix that measured 6/6 on a probe — ADR-024) |
+| Latency p50 / p95 (real HTTP, all 12 completed) | 8,394 ms / 21,045 ms (unusually high — real Gemini congestion that day, see ADR-024) |
+| Token cost, real (`audit_log.total_tokens`) | 834.4 mean / request → $0.0025–$0.015 for the run (~65–390 VND), a range not a point estimate — see ADR-023 |
 
 Reproduce: `uv run python -m scripts.run_held_out_eval --report` (the run itself
-cannot be repeated — it is sealed; see `docs/report.md`). The three real bugs this
-run found were deliberately **not** fixed-and-rerun on the spot — doing so on the
-same held-out set would defeat its purpose. A later session fixed all three without
-touching the sealed set or these numbers; see ADR-020 and "Follow-up" in
-`docs/report.md`.
+cannot be repeated — it is sealed; see `docs/report.md`, "Final report, round 2").
+Round 1 (9/12, on the pre-diacritics corpus, 12 different questions) is kept as
+history in the same report and in `eval/final_v1_pre_diacritics.jsonl` — see
+ADR-022. The recurring router mistake (H21) was deliberately **not**
+fixed-and-rerun — doing so on an already-scored held-out set would defeat its
+purpose; see ADR-024.
 
 ## Limits
 
@@ -291,9 +292,13 @@ touching the sealed set or these numbers; see ADR-020 and "Follow-up" in
   what this baseline does not tell you.
 - A question asking for both a number and a policy in one sentence used to be
   routed to only one tool sometimes (observed during agent development, confirmed
-  again by the held-out set). The router prompt was strengthened afterward and
-  measured 6/6 on a fresh probe (`evidence/router_combined_tools_probe.json`) — a
-  real improvement on a small sample, not a guarantee at scale. See ADR-020.
+  again by the round-1 held-out set). The router prompt was strengthened
+  afterward and measured 6/6 on a fresh probe
+  (`evidence/router_combined_tools_probe.json`) — a real improvement on a small
+  sample, not a guarantee at scale (ADR-020). **It recurred in round 2's held-out
+  set (H21)**, on a question the probe never saw — 6 examples were not enough to
+  call the gap closed; left as a finding, not re-tuned, since fixing it now would
+  be tuning on a held-out result. See ADR-024.
 - A self-contradictory model response (`abstained: true` with a non-empty
   `citations` list) used to 502 after exhausting retries — fixed to degrade to a
   plain abstain instead (citations dropped, logged in `grounding_problems`). See
@@ -304,9 +309,13 @@ touching the sealed set or these numbers; see ADR-020 and "Follow-up" in
 - AuthN is a possession-based API key, not JWT/OAuth2 — no built-in expiry or
   instant revocation, only manual deletion of `api_key_hash`. See ADR-015.
 - Retry jitter was added for the exact mechanism measured causing concurrent
-  `503`s but has not been re-measured under that same scenario — see ADR-016.
-- Token cost is reported in tokens, not currency — no reliable per-token
-  pricing lookup was available at measurement time; see `docs/report.md`.
+  `503`s (ADR-016) and has since been re-measured under real concurrent load
+  (8 trials × 3 concurrent requests, both with and without jitter) — no
+  measurable benefit detected under the session's real (unusually severe)
+  Gemini congestion; the retry budget itself is too short to outlast a
+  sustained outage, a different gap than the one jitter closes. See ADR-026.
+- Token cost is converted to VND/USD as a bounded range (`audit_log` stores only
+  the combined token count, not the input/output split) — see ADR-023.
 - Not deployed to any cloud provider. It runs locally via Docker Compose.
 
 ## Demo and CV material

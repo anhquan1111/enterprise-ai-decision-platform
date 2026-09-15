@@ -184,30 +184,30 @@ Tái hiện kết quả: `uv run python -m scripts.run_eval --report` (đọc k�
 
 Trước khi xây agent cũng đã đo đạc thực nghiệm xem hybrid retrieval có cải thiện được gì không trước khi bắt tay vào code: 5 câu diễn giải cố tình làm khó (dùng từ ngữ khác biệt nhất có thể so với câu hỏi dev) vẫn đạt 100% recall@3. Vì vậy, hybrid search không được xây dựng — xem ADR-011 và [`evidence/hybrid_headroom_probe.json`](evidence/hybrid_headroom_probe.json).
 
-### Tập held-out, chạy đúng một lần
+### Tập held-out vòng 2, chạy đúng một lần
 
 | Chỉ số | Kết quả |
 |---|---|
-| Số câu hỏi held-out | 12 câu (`eval/final.jsonl`), hoàn toàn mới — xem ADR-019 |
-| Trả lời chính xác | 9/12 |
-| Lỗi hạ tầng (502/503, app đã tự retry nhưng vẫn lỗi) | 2/12 |
-| Router chọn sai tool cho câu hỏi kết hợp SQL + Docs | 1/12 |
-| Độ trễ p50 / p95 (gọi HTTP thật, 10 request thành công) | 2.807 ms / 7.848 ms |
-| Chi phí token thật (`audit_log.total_tokens`, số đo thật đầu tiên từng được ghi) | Trung bình 618.9 tokens / request |
+| Số câu hỏi held-out | 12 câu (`eval/final.jsonl`), hoàn toàn mới — xem ADR-024 |
+| Trả lời chính xác | 11/12 |
+| Lỗi hạ tầng ở trạng thái cuối cùng | 0/12 (giữa lúc chạy phát hiện và vá một lỗ hổng retry thật ở `embeddings.py` — xem ADR-024) |
+| Router chọn sai tool cho câu hỏi kết hợp SQL + Docs | 1/12 (tái phát đúng lỗi của vòng 1, sau một lần đã sửa và đo 6/6 trên probe riêng — ADR-024) |
+| Độ trễ p50 / p95 (gọi HTTP thật, cả 12 request hoàn thành) | 8.394 ms / 21.045 ms (bất thường cao — Gemini nghẽn thật hôm đó, xem ADR-024) |
+| Chi phí token thật (`audit_log.total_tokens`) | Trung bình 834,4 token/request → $0,0025–$0,015 cho cả lần chạy (~65–390 VNĐ), một khoảng chứ không phải một con số điểm — xem ADR-023 |
 
-Tái hiện kết quả: `uv run python -m scripts.run_held_out_eval --report` (bản thân lượt chạy không được lặp lại — đã được niêm phong; xem `docs/report.md`). Ba lỗi thật phát hiện trong lần chạy này đã được **chủ động giữ nguyên, không sửa ngay lập tức** — vì sửa rồi chạy lại trên cùng tập held-out sẽ làm mất đi ý nghĩa đánh giá khách quan. Sau đó một phiên làm việc riêng đã xử lý cả 3 lỗi này mà không chạm vào tập held-out niêm phong hay số liệu đã báo cáo; xem ADR-020 và mục "Follow-up" trong `docs/report.md`.
+Tái hiện kết quả: `uv run python -m scripts.run_held_out_eval --report` (bản thân lượt chạy không được lặp lại — đã được niêm phong; xem `docs/report.md`, mục "Final report, round 2"). Vòng 1 (9/12, trên corpus trước khi có dấu, 12 câu khác) được giữ nguyên làm hồ sơ lịch sử trong cùng báo cáo và trong `eval/final_v1_pre_diacritics.jsonl` — xem ADR-022. Lỗi router tái phát (H21) đã được **chủ động giữ nguyên, không sửa rồi chạy lại** — vì tập held-out đã chấm điểm rồi, sửa lúc này sẽ làm mất đi ý nghĩa đánh giá khách quan; xem ADR-024.
 
 ## Giới hạn của hệ thống
 
 - Corpus tài liệu là **dữ liệu tổng hợp (synthetic)**, được viết riêng cho dự án này. Không dùng tài liệu thật của bất kỳ doanh nghiệp nào.
 - Vector search dùng phương pháp exact search qua pgvector, chưa đánh index ANN (HNSW/IVFFlat). Đúng đắn ở quy mô vài trăm chunk; không đại diện cho khả năng mở rộng lên hàng triệu chunk.
 - Bộ 25 câu trên corpus 16 chunk là quy mô phục vụ học tập và định vị lỗi. Kết quả không có lỗi nào ở baseline là kết quả thực tế trên bộ dữ liệu này, **không phải bằng chứng** rằng hệ thống hoàn toàn tin cậy trong mọi tình huống thực tế — xem mục "Not yet measured" trong `docs/report.md`.
-- Một câu hỏi vừa hỏi số liệu vừa hỏi chính sách trong một câu trước đây đôi khi chỉ được route tới một tool (quan sát được khi xây agent, tập held-out xác nhận lại lần nữa). Sau đó prompt router đã được gia cố và đạt 6/6 trên bài kiểm tra mới (`evidence/router_combined_tools_probe.json`) — đây là sự cải thiện trên mẫu nhỏ, không phải cam kết tuyệt đối ở quy mô lớn (xem ADR-020).
+- Một câu hỏi vừa hỏi số liệu vừa hỏi chính sách trong một câu trước đây đôi khi chỉ được route tới một tool (quan sát được khi xây agent, tập held-out vòng 1 xác nhận lại lần nữa). Sau đó prompt router đã được gia cố và đạt 6/6 trên bài kiểm tra mới (`evidence/router_combined_tools_probe.json`) — đây là sự cải thiện trên mẫu nhỏ, không phải cam kết tuyệt đối ở quy mô lớn (ADR-020). **Lỗi này tái phát ở tập held-out vòng 2** (câu H21, một câu bài probe chưa từng thấy) — 6 mẫu chưa đủ để coi khoảng trống đã đóng; để nguyên không vá tiếp vì sửa lúc này sẽ là tinh chỉnh dựa trên kết quả held-out. Xem ADR-024.
 - Phản hồi tự mâu thuẫn từ model (`abstained: true` nhưng danh sách `citations` lại có nội dung) trước đây gây lỗi 502 sau khi thử lại hết số lần — đã được sửa để tự động giáng cấp thành từ chối trả lời hợp lệ (bỏ citations, ghi nhận vào `grounding_problems`). Xem ADR-020.
 - Lỗi timeout mạng thuần túy khi gọi Gemini (`httpx.TimeoutException`/`ConnectError`) trước đây vô tình bỏ qua vòng lặp retry — đã được sửa để tự retry tương tự như mã lỗi HTTP 503 (xem ADR-020).
 - Cơ chế xác thực AuthN sử dụng API key dạng chuỗi bí mật, chưa phải JWT/OAuth2 — chưa có tính năng hết hạn tự động hay thu hồi tức thì, việc thu hồi hiện tại thực hiện bằng cách xóa thủ công `api_key_hash` trong database (xem ADR-015).
-- Jitter trong cơ chế retry được thêm vào để giải quyết hiện tượng tranh chấp gây lỗi `503` đồng thời, nhưng chưa được đo lại trong đúng kịch bản tải cao đó (xem ADR-016).
-- Chi phí token được báo cáo bằng số lượng token, chưa quy đổi ra tiền tệ do thời điểm đo chưa có bảng giá tra cứu API tự động đáng tin cậy.
+- Jitter trong cơ chế retry được thêm để giải quyết hiện tượng tranh chấp gây lỗi `503` đồng thời (ADR-016), và đã được đo lại dưới tải đồng thời thật (8 lượt × 3 request, có/không jitter) — không thấy cải thiện đo được dưới mức nghẽn Gemini bất thường cao của phiên đo; ngân sách retry tự nó ngắn hơn một đợt nghẽn kéo dài — một khoảng trống khác với khoảng jitter đã đóng. Xem ADR-026.
+- Chi phí token được quy đổi ra VNĐ/USD dưới dạng một khoảng (`audit_log` chỉ lưu tổng token, chưa tách input/output) — xem ADR-023.
 - Hệ thống chưa triển khai lên cloud; chạy cục bộ qua Docker Compose.
 
 ## Tài liệu Demo và CV

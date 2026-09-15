@@ -1159,3 +1159,57 @@ dev sạch từ đầu (một lệnh, không cần biết lịch sử migration)
 thay đổi schema TIẾP THEO trên một DB đã tồn tại — từ migration kế tiếp trở đi, mọi
 `ALTER TABLE`/`CREATE TABLE` mới nên đi qua `alembic revision` thay vì thêm một file
 `sql/0N_*.sql` đánh số mới, để có lịch sử version thật thay vì chỉ có thứ tự file.
+
+## ADR-026 — Đo lại jitter dưới tải đồng thời thật: không thấy cải thiện đo được
+
+**Ngày:** sau báo cáo cuối · **Trạng thái:** accepted, đo xong một khoảng trống đã ghi từ ADR-016
+
+**Bối cảnh.** ADR-016 thêm `random.uniform(0, 0.5)` vào backoff của
+`generation.py`/`router.py`/`ocr.py` (sau này cả `embeddings.py`, ADR-024) sau khi
+quan sát 2/3 request `/ask` đồng thời nhận `503` — nguyên nhân xác định: cả ba
+request retry theo đúng cùng lịch (1s, 2s, 4s), va lại giới hạn tốc độ của Gemini ở
+cùng thời điểm. ADR-016 tự ghi rõ đây là khoảng trống: "chưa đo lại tỷ lệ 503
+trước/sau ở đúng kịch bản 3-request-đồng-thời". ADR này đo đúng khoảng trống đó.
+
+**Phương pháp.** `scripts/probe_retry_jitter_load.py`: gọi thẳng `run_agent()`
+trong tiến trình bằng `ThreadPoolExecutor` (3 luồng thật, không phải giả lập) —
+phạm vi đo là cơ chế retry/backoff/jitter của các hàm gọi Gemini, không phải toàn
+bộ đường HTTP/xác thực. 8 lượt × 3 request đồng thời cho mỗi điều kiện (có/không
+jitter), bật/tắt bằng cách ghi trực tiếp vào biến module-level
+`_NETWORK_RETRY_JITTER_S` giữa hai điều kiện. **Cả hai điều kiện chạy nối tiếp
+nhau trong cùng một lần gọi script** — mức độ nghẽn thật của Gemini biến đổi theo
+thời gian (thấy rõ suốt phiên đo held-out v2, ADR-024), nên so sánh "có jitter lúc
+này" với "không jitter lúc khác xa" sẽ không công bằng.
+
+**Kết quả: không thấy cải thiện đo được — nếu có khác biệt, còn hơi tệ hơn, nhưng
+trong biên độ nhiễu.**
+
+| Điều kiện | Tỷ lệ thất bại |
+|---|---:|
+| Có jitter (như đang triển khai, ADR-016) | 23/24 (95,8%) |
+| Không jitter (tắt bằng monkeypatch) | 20/24 (83,3%) |
+
+Cả hai tỷ lệ đều bị chi phối bởi mức nghẽn thật cực cao của Gemini trong phiên đo
+này (cùng hiện tượng đã thấy suốt ADR-024) — từng lượt riêng lẻ dao động từ 0/3 tới
+3/3 thất bại ở CẢ HAI điều kiện, nhiễu nội tại lớn hơn nhiều so với chênh lệch 3
+lần thất bại giữa hai điều kiện.
+
+**Không kết luận rằng bản vá ADR-016 sai.** Jitter giải quyết đúng một cơ chế cụ
+thể: nhiều client retry TRÙNG THỜI ĐIỂM. Đó là một cơ chế thật, khác với nghẽn KÉO
+DÀI vượt quá toàn bộ ngân sách retry — ở mức nghẽn hôm nay, ngân sách retry (3 lần
+thử, backoff tối đa ≈ 7s + jitter tối đa 1,5s ≈ 8,5s tổng) liên tục ngắn hơn hẳn
+thời gian một đợt nghẽn thật (kéo dài hàng chục giây tới vài phút, quan sát được
+suốt phiên held-out v2) — jitter không còn gì để giúp một khi MỌI lần thử trong
+ngân sách đều rơi vào cùng một đợt nghẽn.
+
+**Để nguyên không vá thêm — đây là một khoảng trống KHÁC, không phải khoảng trống
+ADR-016 đã đóng.** Tăng số lần retry hay đổi chiến lược backoff (thích ứng theo độ
+dài đợt nghẽn thay vì cố định) sẽ giải quyết đúng vấn đề "ngân sách retry ngắn hơn
+đợt nghẽn" — nhưng đó là một quyết định riêng, cần đo trước khi làm (ví dụ: retry
+nhiều hơn tốn tiền/thời gian hơn cho MỌI request, kể cả lúc không nghẽn), không
+phải hệ quả tự động của phát hiện này. Ghi nhận là khoảng trống đã biết.
+
+**Giới hạn của phép đo này.** Đo trong tiến trình (bỏ qua tầng HTTP/xác thực thật),
+và dưới mức nghẽn BẤT THƯỜNG cao của đúng ngày đo — không chắc đại diện cho điều
+kiện vận hành thông thường. `evidence/retry_jitter_load_probe.json` giữ toàn bộ dữ
+liệu thô cho ai muốn phân tích lại.

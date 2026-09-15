@@ -1,0 +1,195 @@
+{
+  "measured_at": "2026-09-15T16:58:41+00:00",
+  "concurrent_requests": 3,
+  "trials_per_condition": 8,
+  "question": "Doanh thu phòng sales tháng 3 năm 2026 là bao nhiêu, và nhân viên chính thức được nghỉ phép bao nhiêu ngày một năm?",
+  "with_jitter": {
+    "jitter_enabled": true,
+    "jitter_s": 0.5,
+    "total_calls": 24,
+    "total_failed": 23,
+    "failure_rate": "23/24",
+    "trials": [
+      {
+        "trial": 1,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 11910
+      },
+      {
+        "trial": 2,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 10827
+      },
+      {
+        "trial": 3,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 23944
+      },
+      {
+        "trial": 4,
+        "n_concurrent": 3,
+        "n_failed": 2,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 14599
+      },
+      {
+        "trial": 5,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 13289
+      },
+      {
+        "trial": 6,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 6507
+      },
+      {
+        "trial": 7,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 12852
+      },
+      {
+        "trial": 8,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 23062
+      }
+    ]
+  },
+  "without_jitter": {
+    "jitter_enabled": false,
+    "jitter_s": 0.0,
+    "total_calls": 24,
+    "total_failed": 20,
+    "failure_rate": "20/24",
+    "trials": [
+      {
+        "trial": 1,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 7335
+      },
+      {
+        "trial": 2,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 5565
+      },
+      {
+        "trial": 3,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 6030
+      },
+      {
+        "trial": 4,
+        "n_concurrent": 3,
+        "n_failed": 2,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 33503
+      },
+      {
+        "trial": 5,
+        "n_concurrent": 3,
+        "n_failed": 1,
+        "errors": [
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 14202
+      },
+      {
+        "trial": 6,
+        "n_concurrent": 3,
+        "n_failed": 2,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 62866
+      },
+      {
+        "trial": 7,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 13035
+      },
+      {
+        "trial": 8,
+        "n_concurrent": 3,
+        "n_failed": 3,
+        "errors": [
+          "HTTPStatusError",
+          "HTTPStatusError",
+          "HTTPStatusError"
+        ],
+        "elapsed_ms": 14637
+      }
+    ]
+  }
+}
