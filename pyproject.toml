@@ -12,7 +12,7 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.9.0",
     "pydantic-settings>=2.15.0",
-    "psycopg[binary]>=3.2.0",
+    "psycopg[binary,pool]>=3.2.0",
     "pgvector>=0.3.6",
     # Ingestion và bộ eval (D2) đều xử lý dữ liệu dạng bảng; để ở dependency chính
     # thay vì extra để scripts/ chạy được ngay sau uv sync.
@@ -31,6 +31,10 @@ dev = [
     "mypy>=1.13.0",
     "types-pyyaml>=6.0.12",
     "pandas-stubs>=2.2.0",
+    # Chỉ dùng để dựng file PDF/ảnh mẫu mô phỏng bản scan cho
+    # scripts/generate_ocr_sample.py — OCR thật (src/ocr.py) không cần thư viện này,
+    # chỉ gọi Gemini vision qua httpx đã có sẵn.
+    "pillow>=11.0.0",
 ]
 # Installed on D2 when the eval harness lands (MLflow run tracking + BM25).
 eval = [

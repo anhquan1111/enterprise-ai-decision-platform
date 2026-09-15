@@ -37,6 +37,17 @@ class Settings(BaseSettings):
     # Số giây libpq chờ cho MỖI địa chỉ đã resolve. Thiếu tham số này thì mặc định
     # là chờ vô hạn, biến "database không tới được" thành treo thay vì lỗi. ADR-005.
     postgres_connect_timeout: int = 5
+    # Server-side: PostgreSQL tự huỷ một CÂU LỆNH chạy quá lâu, dù connection đã mở
+    # thành công (connect_timeout ở trên không bảo vệ được việc này — nó chỉ canh
+    # lúc MỞ connection). Thiếu nó, một câu SQL bất thường (kể cả do LLM sinh ra ở
+    # D3) có thể treo vô hạn phía server. Ngày 25 (vault) đã ghi đây là một khoảng
+    # trống thật, D4 vá lại. 5s vì mọi truy vấn hiện tại đều đơn giản (D2/D3).
+    postgres_statement_timeout_ms: int = 5000
+    # Connection pool (D4) — thay vì mở connection mới mỗi request (ADR-005 gốc chỉ
+    # nói timeout, chưa nói pool). Kích thước nhỏ vì corpus/traffic hiện tại nhỏ;
+    # tăng khi đo thấy cần, không đoán trước.
+    postgres_pool_min_size: int = 1
+    postgres_pool_max_size: int = 10
 
     # ── LLM: đã chốt ở ADR-002 ────────────────────────────
     llm_provider: str = "google"
@@ -74,6 +85,7 @@ class Settings(BaseSettings):
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
             f"?connect_timeout={self.postgres_connect_timeout}"
+            f"&options=-c%20statement_timeout%3D{self.postgres_statement_timeout_ms}"
         )
 
 

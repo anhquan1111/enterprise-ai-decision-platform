@@ -6,6 +6,7 @@ cụ thể, không fallback văn xuôi, và hai cổng tách biệt — schema v
 """
 
 import json
+import random
 import time
 from dataclasses import dataclass
 
@@ -21,6 +22,11 @@ from src.retrieval import RetrievedChunk
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 _NETWORK_RETRY_ATTEMPTS = 3
 _NETWORK_RETRY_BACKOFF_S = 1.0
+# D4: jitter ngẫu nhiên cộng thêm vào backoff. Đo thật ở ngày 25 (vault):
+# nhiều request đồng thời retry theo ĐÚNG cùng lịch (1s, 2s, 4s...) có xu hướng va
+# lại rate limit ở cùng một thời điểm — 2/3 request đồng thời nhận 503 dù retry đã
+# chạy. Jitter làm các request retry lệch pha nhau, giảm khả năng va lại.
+_NETWORK_RETRY_JITTER_S = 0.5
 
 GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 REQUEST_TIMEOUT = 60.0
@@ -63,6 +69,7 @@ class GroundedAnswer:
     answer: Answer
     grounding_problems: list[str]
     attempts: int
+    total_tokens: int = 0
 
 
 def build_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
@@ -90,11 +97,13 @@ def _extract_json(raw: str) -> str:
     return text
 
 
-def _call_gemini(prompt: str) -> tuple[str, str | None]:
-    """Gọi Gemini, trả về (nội dung, finish_reason).
+def _call_gemini(prompt: str) -> tuple[str, str | None, int]:
+    """Gọi Gemini, trả về (nội dung, finish_reason, total_tokens).
 
     finish_reason được trả riêng vì một response rỗng do thinking ăn hết
     max_output_tokens vẫn là HTTP 200 — phải đọc finish_reason mới biết, xem ADR-002.
+    total_tokens (D5) đọc từ usageMetadata.totalTokenCount — dùng để báo chi phí thật
+    trong docs/report.md thay vì ước lượng.
     """
     settings = get_settings()
     payload = {
@@ -122,7 +131,9 @@ def _call_gemini(prompt: str) -> tuple[str, str | None]:
             f"{response.status_code} tạm thời", request=response.request, response=response
         )
         if attempt < _NETWORK_RETRY_ATTEMPTS - 1:
-            time.sleep(_NETWORK_RETRY_BACKOFF_S * (2**attempt))
+            time.sleep(
+                _NETWORK_RETRY_BACKOFF_S * (2**attempt) + random.uniform(0, _NETWORK_RETRY_JITTER_S)
+            )
     else:
         assert last_exc is not None
         raise last_exc
@@ -130,7 +141,8 @@ def _call_gemini(prompt: str) -> tuple[str, str | None]:
     body = response.json()
     candidate = body["candidates"][0]
     text = "".join(p.get("text", "") for p in candidate.get("content", {}).get("parts", []))
-    return text, candidate.get("finishReason")
+    total_tokens = body.get("usageMetadata", {}).get("totalTokenCount", 0)
+    return text, candidate.get("finishReason"), total_tokens
 
 
 def _parse_and_validate(raw: str, *, finish_reason: str | None) -> Answer:
@@ -177,15 +189,17 @@ def answer_question(
             citations=[],
             abstained=True,
         )
-        return GroundedAnswer(answer=no_evidence, grounding_problems=[], attempts=0)
+        return GroundedAnswer(answer=no_evidence, grounding_problems=[], attempts=0, total_tokens=0)
 
     prompt = build_prompt(question, chunks)
     allowed_ids = {c.chunk_id for c in chunks}
     current_prompt = prompt
     last_error: str | None = None
+    total_tokens = 0
 
     for attempt in range(1, max_attempts + 1):
-        raw, finish_reason = _call_gemini(current_prompt)
+        raw, finish_reason, tokens = _call_gemini(current_prompt)
+        total_tokens += tokens
         try:
             parsed = _parse_and_validate(raw, finish_reason=finish_reason)
         except SchemaFailure as exc:
@@ -196,6 +210,8 @@ def answer_question(
             )
             continue
         problems = check_grounding(parsed, allowed_ids)
-        return GroundedAnswer(answer=parsed, grounding_problems=problems, attempts=attempt)
+        return GroundedAnswer(
+            answer=parsed, grounding_problems=problems, attempts=attempt, total_tokens=total_tokens
+        )
 
     raise SchemaFailure(f"vẫn sai schema sau {max_attempts} lần: {last_error}")

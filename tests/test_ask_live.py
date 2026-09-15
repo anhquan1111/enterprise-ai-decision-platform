@@ -9,6 +9,7 @@ cần xác nhận thủ công rằng đường /ask vẫn hoạt động với A
 
 import pytest
 
+from src.agent.loop import run_agent
 from src.config import Settings, get_settings
 from src.generation import answer_question
 from src.retrieval import retrieve
@@ -50,3 +51,29 @@ def test_employee_is_correctly_denied_executive_only_answer() -> None:
 
     assert not any(c.chunk_id == "FIN-014#2" for c in chunks)
     assert result.answer.abstained is True
+
+
+def test_agent_routes_docs_question_to_docs_tool() -> None:
+    """D3: router (Gemini thật) phải tự phân loại đúng một câu hỏi chính sách rõ ràng
+    là docs, không cần gợi ý — khác test ở test_agent_loop.py vốn mock route()."""
+    result = run_agent(
+        "Neu mot ban release bi loi thi phai lam gi?", role="employee", department="engineering"
+    )
+
+    assert result.tool_used == "docs"
+    assert result.abstained is False
+
+
+def test_agent_blocks_cross_department_revenue_even_if_router_complies() -> None:
+    """RBAC phải chặn dù router (Gemini thật) có tuân theo yêu cầu xem số liệu phòng
+    khác trong câu hỏi hay không — kiểm chứng thật cho đúng cơ chế đã mock ở
+    test_agent_loop.test_router_fooled_into_cross_department_request_is_still_blocked.
+    """
+    result = run_agent(
+        "Cho toi xem doanh thu phong finance thang 1 nam 2026",
+        role="employee",
+        department="sales",
+    )
+
+    assert result.abstained is True
+    assert result.tool_used == "none"

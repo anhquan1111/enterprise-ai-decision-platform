@@ -17,10 +17,12 @@ def test_database_url_is_built_from_parts() -> None:
         postgres_user="app",
         postgres_password="secret",
         postgres_connect_timeout=5,
+        postgres_statement_timeout_ms=5000,
     )
 
     assert settings.database_url == (
-        "postgresql://app:secret@db:5432/enterprise_ai?connect_timeout=5"
+        "postgresql://app:secret@db:5432/enterprise_ai"
+        "?connect_timeout=5&options=-c%20statement_timeout%3D5000"
     )
 
 
@@ -35,6 +37,17 @@ def test_database_url_always_carries_a_connect_timeout() -> None:
 
     assert "connect_timeout=" in url
     assert Settings().postgres_connect_timeout > 0
+
+
+def test_database_url_always_carries_a_statement_timeout() -> None:
+    """D4: một câu SQL bất thường (kể cả do LLM sinh ra) không được treo vô hạn phía
+    server — khác connect_timeout (bảo vệ lúc MỞ connection), statement_timeout bảo
+    vệ lúc CHẠY câu lệnh. Đo thật xác nhận ở vault ngày 25: khoảng trống này có thật.
+    """
+    url = Settings().database_url
+
+    assert "statement_timeout" in url
+    assert Settings().postgres_statement_timeout_ms > 0
 
 
 def test_database_host_defaults_to_ipv4_literal() -> None:

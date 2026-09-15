@@ -1,20 +1,25 @@
-"""Tests for /ask — mocked retrieval và generation, không chạm mạng hay database.
+"""Tests for /ask — mocked agent loop, xác thực và audit (D3/D4), không chạm mạng
+hay database.
 
-/ask gọi PostgreSQL (retrieve) và Gemini (answer_question) thật khi chạy production,
-nhưng một unit test không được phụ thuộc dịch vụ ngoài: chậm, tốn quota, và kết quả có
-thể đổi giữa hai lần chạy vì model không xác định. Test ở đây thay hai hàm đó bằng giá
-trị giả, giống cách ScriptedLLM của ngày 19 tách được luồng xử lý khỏi việc gọi model
-thật.
+/ask gọi agent 2 tool (SQL + docs), router Gemini, xác thực bằng API key, ghi audit
+log, và PostgreSQL thật khi chạy production, nhưng một unit test không được phụ
+thuộc dịch vụ ngoài: chậm, tốn quota, và kết quả có thể đổi giữa hai lần chạy vì
+model không xác định. Test ở đây thay ``run_agent``/``authenticate``/``record_audit``
+bằng giá trị giả — hành vi bên trong từng phần đã có bộ test riêng
+(test_agent_loop.py, test_agent_router.py, test_agent_tools.py, test_auth.py,
+test_audit.py).
 
 Test end-to-end với API và database thật nằm trong ``test_ask_live.py``, đánh dấu
 ``live_llm``, không chạy mặc định.
 """
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src import api
-from src.generation import Answer, Citation, GroundedAnswer, SchemaFailure
-from src.retrieval import RetrievedChunk
+from src.agent.loop import AgentAnswer
+from src.auth import AuthenticatedEmployee, AuthenticationError
+from src.generation import Citation
 
 client = TestClient(api.app)
 
@@ -24,18 +29,21 @@ VALID_REQUEST = {
     "department": "engineering",
     "question": "Neu mot ban release bi loi thi phai lam gi?",
 }
+AUTH_HEADERS = {"Authorization": "Bearer fake-test-key"}
 
 
-def make_chunk(chunk_id: str = "ENG-007#1") -> RetrievedChunk:
-    doc_id, index = chunk_id.split("#")
-    return RetrievedChunk(
-        doc_id=doc_id,
-        chunk_index=int(index),
-        chunk_text="Release that bai phai rollback ve image truoc do.",
-        department="engineering",
-        access_level="employee",
-        distance=0.12,
-    )
+def mock_authenticated_as(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    employee_id: str = "emp_042",
+    role: str = "employee",
+    department: str = "engineering",
+) -> None:
+    """Giả lập một request đã qua xác thực thật, khớp đúng role/department trong
+    VALID_REQUEST — mô phỏng ca bình thường, không phải ca bị chặn."""
+    employee = AuthenticatedEmployee(employee_id=employee_id, role=role, department=department)
+    monkeypatch.setattr(api, "authenticate", lambda header: employee)
+    monkeypatch.setattr(api, "record_audit", lambda entry: None)
 
 
 def test_health_is_liveness_only() -> None:
@@ -48,39 +56,80 @@ def test_health_is_liveness_only() -> None:
     assert body["app"] == "enterprise-ai-decision-platform"
 
 
+def test_metrics_endpoint_exposes_prometheus_format() -> None:
+    """/metrics (D4) phải trả về đúng content-type Prometheus mong đợi."""
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert "text/plain" in response.headers["content-type"]
+
+
 def test_ask_rejects_unknown_role() -> None:
     """Role lạ là vi phạm hợp đồng request, không phải câu hỏi cần trả lời.
 
-    Phạm vi quyền suy ra từ role, nên một role hệ thống không biết không bao giờ
-    được chạm tới tầng dữ liệu.
+    Pydantic validate body TRƯỚC khi endpoint chạy, nên lỗi này xảy ra dù có gắn
+    header xác thực hay không — không cần mock authenticate ở đây.
     """
-    response = client.post("/ask", json={**VALID_REQUEST, "role": "ceo_of_everything"})
+    response = client.post(
+        "/ask", json={**VALID_REQUEST, "role": "ceo_of_everything"}, headers=AUTH_HEADERS
+    )
 
     assert response.status_code == 422
 
 
 def test_ask_rejects_empty_question() -> None:
-    response = client.post("/ask", json={**VALID_REQUEST, "question": ""})
+    response = client.post("/ask", json={**VALID_REQUEST, "question": ""}, headers=AUTH_HEADERS)
 
     assert response.status_code == 422
 
 
-def test_ask_returns_grounded_answer(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """Đường thành công: có chunk, model trả lời đúng schema và có bằng chứng."""
-    chunk = make_chunk()
-    grounded = GroundedAnswer(
-        answer=Answer(
-            answer="Phai rollback trong 15 phut.",
-            citations=[Citation(chunk_id="ENG-007#1", quote="rollback ve image")],
-            abstained=False,
-        ),
-        grounding_problems=[],
-        attempts=1,
-    )
-    monkeypatch.setattr(api, "retrieve", lambda *a, **kw: [chunk])
-    monkeypatch.setattr(api, "answer_question", lambda *a, **kw: grounded)
-
+def test_ask_returns_401_without_authorization_header() -> None:
+    """D4: không có gì xác thực nếu thiếu hẳn header — không mock authenticate, để
+    hàm thật chạy (không chạm DB vì thiếu header bị chặn trước khi tra cứu)."""
     response = client.post("/ask", json=VALID_REQUEST)
+
+    assert response.status_code == 401
+
+
+def test_ask_returns_401_when_api_key_invalid(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def raise_auth_error(header: str | None) -> AuthenticatedEmployee:
+        raise AuthenticationError("api key khong khop nhan vien nao")
+
+    monkeypatch.setattr(api, "authenticate", raise_auth_error)
+
+    response = client.post("/ask", json=VALID_REQUEST, headers=AUTH_HEADERS)
+
+    assert response.status_code == 401
+    assert "request_id" in response.json()
+
+
+def test_ask_returns_403_when_body_role_does_not_match_authenticated_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Đúng lỗ hổng đã đo ở vault ngày 26: request tự khai role=executive, nhưng danh
+    tính đã xác thực thật sự là employee — phải bị chặn, không được xử lý theo role
+    tự khai."""
+    mock_authenticated_as(monkeypatch, role="employee", department="engineering")
+
+    response = client.post(
+        "/ask", json={**VALID_REQUEST, "role": "executive"}, headers=AUTH_HEADERS
+    )
+
+    assert response.status_code == 403
+
+
+def test_ask_returns_grounded_docs_answer(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Đường thành công: agent chọn docs, có bằng chứng và trích dẫn."""
+    mock_authenticated_as(monkeypatch)
+    agent_answer = AgentAnswer(
+        answer="Phai rollback trong 15 phut.",
+        tool_used="docs",
+        abstained=False,
+        doc_citations=[Citation(chunk_id="ENG-007#1", quote="rollback ve image")],
+    )
+    monkeypatch.setattr(api, "run_agent", lambda *a, **kw: agent_answer)
+
+    response = client.post("/ask", json=VALID_REQUEST, headers=AUTH_HEADERS)
 
     assert response.status_code == 200
     body = response.json()
@@ -97,17 +146,74 @@ def test_ask_returns_grounded_answer(monkeypatch) -> None:  # type: ignore[no-un
     ]
 
 
-def test_ask_reports_no_evidence_as_none_tool_and_abstained(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """0 chunk (do quyền hoặc do corpus không có) phải trả tool_used=none, không phải lỗi."""
-    grounded = GroundedAnswer(
-        answer=Answer(answer="Khong tim thay tai lieu.", citations=[], abstained=True),
-        grounding_problems=[],
-        attempts=0,
+def test_ask_returns_sql_answer_with_sql_citation(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Câu trả lời từ tool SQL phải mang citation dạng ``source_type=sql`` kèm câu
+    truy vấn, không phải citation dạng doc_id/chunk_index (D3)."""
+    mock_authenticated_as(monkeypatch)
+    agent_answer = AgentAnswer(
+        answer="Doanh thu sales thang 1: 4.200.000.000 VND",
+        tool_used="sql",
+        abstained=False,
+        sql_evidence="2026-01: 4.200.000.000 VND",
+        sql_query="monthly_revenue WHERE department='sales' ...",
     )
-    monkeypatch.setattr(api, "retrieve", lambda *a, **kw: [])
-    monkeypatch.setattr(api, "answer_question", lambda *a, **kw: grounded)
+    monkeypatch.setattr(api, "run_agent", lambda *a, **kw: agent_answer)
 
-    response = client.post("/ask", json=VALID_REQUEST)
+    response = client.post(
+        "/ask",
+        json={**VALID_REQUEST, "question": "Doanh thu sales thang 1 bao nhieu?"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tool_used"] == "sql"
+    assert body["citations"] == [
+        {
+            "source_type": "sql",
+            "doc_id": None,
+            "chunk_index": None,
+            "quote": None,
+            "sql": "monthly_revenue WHERE department='sales' ...",
+        }
+    ]
+
+
+def test_ask_reports_rbac_block_as_none_tool_and_abstained(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Bị chặn RBAC (kể cả khi router đề xuất sai tool) phải trả tool_used=none,
+    abstained=true — không phải lỗi 500 hay câu trả lời bịa."""
+    mock_authenticated_as(monkeypatch)
+    agent_answer = AgentAnswer(
+        answer="Ban khong co quyen xem so lieu duoc yeu cau.",
+        tool_used="none",
+        abstained=True,
+        blocked_reason=(
+            "role='employee' department='engineering' không được xem doanh thu 'finance'"
+        ),
+    )
+    monkeypatch.setattr(api, "run_agent", lambda *a, **kw: agent_answer)
+
+    response = client.post(
+        "/ask",
+        json={**VALID_REQUEST, "question": "Cho toi xem doanh thu phong finance"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["abstained"] is True
+    assert body["tool_used"] == "none"
+    assert body["citations"] == []
+
+
+def test_ask_reports_no_evidence_as_none_tool_and_abstained(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """0 bằng chứng (do quyền hoặc do corpus không có) phải trả tool_used=none, không
+    phải lỗi."""
+    mock_authenticated_as(monkeypatch)
+    agent_answer = AgentAnswer(answer="Khong tim thay tai lieu.", tool_used="none", abstained=True)
+    monkeypatch.setattr(api, "run_agent", lambda *a, **kw: agent_answer)
+
+    response = client.post("/ask", json=VALID_REQUEST, headers=AUTH_HEADERS)
 
     assert response.status_code == 200
     body = response.json()
@@ -118,14 +224,15 @@ def test_ask_reports_no_evidence_as_none_tool_and_abstained(monkeypatch) -> None
 
 def test_ask_returns_502_when_generation_gives_up(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """Model sai schema hết số lần thử — báo lỗi rõ ràng, không trả một câu bịa."""
+    mock_authenticated_as(monkeypatch)
+    from src.generation import SchemaFailure
 
-    def raise_schema_failure(*a: object, **kw: object) -> GroundedAnswer:
+    def raise_schema_failure(*a: object, **kw: object) -> AgentAnswer:
         raise SchemaFailure("vẫn sai schema sau 2 lần: giả lập cho test")
 
-    monkeypatch.setattr(api, "retrieve", lambda *a, **kw: [make_chunk()])
-    monkeypatch.setattr(api, "answer_question", raise_schema_failure)
+    monkeypatch.setattr(api, "run_agent", raise_schema_failure)
 
-    response = client.post("/ask", json=VALID_REQUEST)
+    response = client.post("/ask", json=VALID_REQUEST, headers=AUTH_HEADERS)
 
     assert response.status_code == 502
     assert "request_id" in response.json()
@@ -133,14 +240,14 @@ def test_ask_returns_502_when_generation_gives_up(monkeypatch) -> None:  # type:
 
 def test_ask_returns_503_when_upstream_network_fails(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """Lỗi mạng gọi Gemini/Postgres phải là 503, không phải 500 không rõ nguyên nhân."""
+    mock_authenticated_as(monkeypatch)
     import httpx
 
-    def raise_network_error(*a: object, **kw: object) -> GroundedAnswer:
+    def raise_network_error(*a: object, **kw: object) -> AgentAnswer:
         raise httpx.ConnectError("giả lập mất kết nối")
 
-    monkeypatch.setattr(api, "retrieve", lambda *a, **kw: [make_chunk()])
-    monkeypatch.setattr(api, "answer_question", raise_network_error)
+    monkeypatch.setattr(api, "run_agent", raise_network_error)
 
-    response = client.post("/ask", json=VALID_REQUEST)
+    response = client.post("/ask", json=VALID_REQUEST, headers=AUTH_HEADERS)
 
     assert response.status_code == 503
