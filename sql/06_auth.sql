@@ -1,4 +1,4 @@
--- D4: cot luu API key da bam hash cho tung nhan vien.
+-- Giai doan xac thuc & do tin cay: cot luu API key da bam hash cho tung nhan vien.
 --
 -- Khong luu key dang plaintext o bat ky dau - chi luu SHA-256 hex digest. Khi xac
 -- thuc, server bam key nguoi goi gui len roi so voi cot nay, khong bao gio giai ma

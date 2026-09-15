@@ -1,4 +1,5 @@
-"""D4: ghi audit_log - bang da ton tai tu D1, chua tung duoc ghi vao cho toi bay gio.
+"""Giai doan xac thuc & do tin cay: ghi audit_log - bang da ton tai tu giai doan tang
+du lieu, chua tung duoc ghi vao cho toi bay gio.
 
 Ghi audit KHONG duoc lam sap request cua nguoi dung: neu ghi log that bai (vd DB
 tam thoi khong toi duoc), request van phai tra loi binh thuong - chi log loi ra

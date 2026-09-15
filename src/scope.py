@@ -30,7 +30,8 @@ def visible_access_levels(role: str) -> list[str]:
 
 
 def can_query_department(*, role: str, caller_department: str, target_department: str) -> bool:
-    """Ranh giới quyền cho tool SQL (D3) — khác ranh giới của docs retrieval (ADR-009).
+    """Ranh giới quyền cho tool SQL (giai đoạn agent routing) — khác ranh giới của
+    docs retrieval (ADR-009).
 
     ADR-009 đã chốt: doanh thu một phòng ban là số liệu phòng ban đó sở hữu, một nhân
     viên phòng khác không cần thấy nó ở dạng số thô. Quyết định cụ thể (ADR-011):

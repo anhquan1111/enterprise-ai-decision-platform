@@ -1,4 +1,5 @@
-"""Hai tool cua agent D3: sql (so lieu doanh thu) va docs (chinh sach/quy trinh).
+"""Hai tool cua agent giai doan agent routing: sql (so lieu doanh thu) va docs
+(chinh sach/quy trinh).
 
 Ca hai tool deu ap dung dung nguyen tac da hoc o Ngay 22: RBAC kiem TRUOC khi thuc
 thi, khong phai loc sau; loi ha tang (mang, timeout) khac loi nghiep vu (khong co du
@@ -24,8 +25,8 @@ class ToolPermissionError(Exception):
     """RBAC chặn — role/department của người gọi không được phép thấy dữ liệu này.
 
     Tách khỏi ToolExecutionError: đây không phải "không có dữ liệu", mà là "có dữ
-    liệu nhưng người gọi không được xem" — hai lý do abstain khác nhau, xem D2's 8
-    nhãn lỗi (access_correct khác no_knowledge_correct).
+    liệu nhưng người gọi không được xem" — hai lý do abstain khác nhau, xem 8 nhãn
+    lỗi của giai đoạn retrieval nền tảng (access_correct khác no_knowledge_correct).
     """
 
 

@@ -1,4 +1,5 @@
-"""D4: sinh API key that cho tung nhan vien da seed, in ra DUNG MOT LAN.
+"""Giai doan xac thuc & do tin cay: sinh API key that cho tung nhan vien da seed,
+in ra DUNG MOT LAN.
 
 Chi luu SHA-256 hash vao cot employees.api_key_hash (sql/06_auth.sql) - khong bao
 gio luu plaintext. Day la mo phong dung cach mot he thong that cap phat credential:

@@ -1,5 +1,5 @@
-"""Tests for /ask — mocked agent loop, xác thực và audit (D3/D4), không chạm mạng
-hay database.
+"""Tests for /ask — mocked agent loop, xác thực và audit (agent routing/xác thực &
+độ tin cậy), không chạm mạng hay database.
 
 /ask gọi agent 2 tool (SQL + docs), router Gemini, xác thực bằng API key, ghi audit
 log, và PostgreSQL thật khi chạy production, nhưng một unit test không được phụ
@@ -57,7 +57,8 @@ def test_health_is_liveness_only() -> None:
 
 
 def test_metrics_endpoint_exposes_prometheus_format() -> None:
-    """/metrics (D4) phải trả về đúng content-type Prometheus mong đợi."""
+    """/metrics (giai đoạn xác thực & độ tin cậy) phải trả về đúng content-type
+    Prometheus mong đợi."""
     response = client.get("/metrics")
 
     assert response.status_code == 200
@@ -84,7 +85,8 @@ def test_ask_rejects_empty_question() -> None:
 
 
 def test_ask_returns_401_without_authorization_header() -> None:
-    """D4: không có gì xác thực nếu thiếu hẳn header — không mock authenticate, để
+    """Giai đoạn xác thực & độ tin cậy: không có gì xác thực nếu thiếu hẳn header —
+    không mock authenticate, để
     hàm thật chạy (không chạm DB vì thiếu header bị chặn trước khi tra cứu)."""
     response = client.post("/ask", json=VALID_REQUEST)
 
@@ -148,7 +150,7 @@ def test_ask_returns_grounded_docs_answer(monkeypatch) -> None:  # type: ignore[
 
 def test_ask_returns_sql_answer_with_sql_citation(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """Câu trả lời từ tool SQL phải mang citation dạng ``source_type=sql`` kèm câu
-    truy vấn, không phải citation dạng doc_id/chunk_index (D3)."""
+    truy vấn, không phải citation dạng doc_id/chunk_index (giai đoạn agent routing)."""
     mock_authenticated_as(monkeypatch)
     agent_answer = AgentAnswer(
         answer="Doanh thu sales thang 1: 4.200.000.000 VND",

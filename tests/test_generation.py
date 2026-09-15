@@ -106,7 +106,7 @@ def test_check_grounding_passes_valid_answer() -> None:
     assert check_grounding(answer, allowed_chunk_ids={"A#0"}) == []
 
 
-# ── Answer: mâu thuẫn abstained=true kèm citations (D5, ADR-020) ────
+# ── Answer: mâu thuẫn abstained=true kèm citations (giai đoạn báo cáo cuối, ADR-020) ────
 
 
 def test_answer_drops_citations_and_flags_when_abstained_but_model_sent_citations() -> None:
@@ -214,8 +214,9 @@ def test_answer_question_does_not_retry_on_client_error(monkeypatch) -> None:  #
 
 
 def test_answer_question_retries_after_network_timeout(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """D5 (ADR-020): httpx.TimeoutException/ConnectError không phải status code —
-    trước đây thoát ngay không retry (phát hiện qua held-out H02, xem ADR-019).
+    """Giai đoạn báo cáo cuối (ADR-020): httpx.TimeoutException/ConnectError không
+    phải status code — trước đây thoát ngay không retry (phát hiện qua held-out H02,
+    xem ADR-019).
     Giờ phải được thử lại giống hệt một 503."""
     good = json.dumps({"answer": "qua duoc timeout", "citations": [], "abstained": True})
     monkeypatch.setattr("src.generation._NETWORK_RETRY_BACKOFF_S", 0.0)
@@ -255,7 +256,8 @@ def test_answer_question_raises_after_network_timeout_exhausts_retries(monkeypat
 
 def test_answer_question_returns_grounding_problems_without_raising(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     """Bịa nguồn là vấn đề nghiêm trọng, nhưng answer_question không raise vì nó —
-    D4 cần response đầy đủ để ghi audit log, không phải một exception im lặng."""
+    giai đoạn xác thực & độ tin cậy cần response đầy đủ để ghi audit log, không phải
+    một exception im lặng."""
     bad = json.dumps(
         {"answer": "bia dat", "citations": [{"chunk_id": "Z#9", "quote": "x"}], "abstained": False}
     )

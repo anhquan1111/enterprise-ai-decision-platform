@@ -1,4 +1,5 @@
-"""Test cho scope.py: can_query_department, ranh gioi RBAC cho tool SQL (D3, ADR-012).
+"""Test cho scope.py: can_query_department, ranh gioi RBAC cho tool SQL (giai doan
+agent routing, ADR-012).
 
 Tach rieng test_contracts.py vi visible_access_levels da co test o do cho duong docs;
 day chi test them ranh gioi moi cho duong SQL.

@@ -52,7 +52,7 @@ def test_docs_only_flow_uses_generation_answer(monkeypatch: pytest.MonkeyPatch) 
 
     assert result.tool_used == "docs"
     assert result.abstained is False
-    # D5: total_tokens = router (30) + generation (200), sql_tool khong goi LLM.
+    # Giai doan bao cao cuoi: total_tokens = router (30) + generation (200), sql_tool khong goi LLM.
     assert result.total_tokens == 230
     assert "rollback" in result.answer.lower()
 
@@ -166,7 +166,7 @@ def test_router_schema_failure_results_in_abstain(monkeypatch: pytest.MonkeyPatc
 
     assert result.abstained is True
     assert result.blocked_reason == "router_schema_failed"
-    # D5: các lượt gọi router đã thử vẫn tốn tiền thật dù cuối cùng thất bại.
+    # Giai đoạn báo cáo cuối: các lượt gọi router đã thử vẫn tốn tiền thật dù cuối cùng thất bại.
     assert result.total_tokens == 15
 
 

@@ -23,7 +23,7 @@ _TEST_EMPLOYEE_ID = "test_auth_tmp_001"
 @pytest.fixture
 def temp_employee_with_key() -> Iterator[tuple[str, str]]:
     """Tạo một nhân viên tạm với API key thật, xoá lại sau khi test xong — không
-    đụng tới 8 nhân viên seed thật (D1) hay key đã cấp cho họ."""
+    đụng tới 8 nhân viên seed thật (giai đoạn tầng dữ liệu) hay key đã cấp cho họ."""
     api_key = secrets.token_urlsafe(32)
     key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
 

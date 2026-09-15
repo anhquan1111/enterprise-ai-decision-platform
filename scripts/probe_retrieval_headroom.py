@@ -1,9 +1,10 @@
-"""D3: kiem tra truoc khi quyet dinh co lam hybrid retrieval hay khong.
+"""Giai doan agent routing: kiem tra truoc khi quyet dinh co lam hybrid retrieval hay khong.
 
-Khong sua eval/dev.jsonl (so baseline 25 cau da bao o D2 phai giu nguyen, xem AGENTS.md
-muc 4). Day la mot probe dung MOT LAN, khong phai bo eval chinh thuc: 5 cau hoi moi,
-paraphrase manh (tranh chia se tu vung voi gold chunk) de kiem xem dense retrieval con
-lo hong nao khong, truoc khi ket luan co dang lam hybrid o D3 hay khong.
+Khong sua eval/dev.jsonl (so baseline 25 cau da bao o giai doan retrieval nen tang
+phai giu nguyen, xem AGENTS.md muc 4). Day la mot probe dung MOT LAN, khong phai bo
+eval chinh thuc: 5 cau hoi moi, paraphrase manh (tranh chia se tu vung voi gold
+chunk) de kiem xem dense retrieval con lo hong nao khong, truoc khi ket luan co dang
+lam hybrid o giai doan agent routing hay khong.
 
     uv run python -m scripts.probe_retrieval_headroom
 """

@@ -80,8 +80,9 @@ def test_mom_growth_is_negative_where_revenue_dropped() -> None:
 def test_employee_sees_fewer_chunks_than_executive() -> None:
     """Cùng một phòng ban, role cao hơn thấy nhiều chunk hơn.
 
-    Đây là bản nháp của test cách ly quyền sẽ hoàn thiện ở D4. Ở D1 nó đã chứng minh
-    được một điều: phạm vi quyền áp được bằng filter ở tầng truy vấn.
+    Đây là bản nháp của test cách ly quyền sẽ hoàn thiện ở giai đoạn xác thực & độ
+    tin cậy. Ở giai đoạn tầng dữ liệu nó đã chứng minh được một điều: phạm vi quyền
+    áp được bằng filter ở tầng truy vấn.
     """
     sql = """
         SELECT COUNT(*) AS n

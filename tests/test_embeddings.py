@@ -1,6 +1,7 @@
 """Test cho embeddings.py — mock httpx.post, không gọi Gemini thật.
 
-conftest.py cách ly Settings khỏi .env cho mọi test (đúng thiết kế D1: một test không
+conftest.py cách ly Settings khỏi .env cho mọi test (đúng thiết kế của giai đoạn
+tầng dữ liệu: một test không
 được phụ thuộc máy nào đang chạy nó có .env gì). Vì vậy mỗi test ở đây tự đặt một key
 giả qua biến môi trường, rồi xoá cache Settings để giá trị mới có hiệu lực.
 """

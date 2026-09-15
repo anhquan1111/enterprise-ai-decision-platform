@@ -18,8 +18,8 @@ from src.config import get_settings
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 _NETWORK_RETRY_ATTEMPTS = 3
 _NETWORK_RETRY_BACKOFF_S = 1.0
-# D4: xem giải thích đầy đủ ở generation.py — jitter chống nhiều request đồng thời
-# retry cùng lịch, đo thật ở ngày 25 (vault).
+# Giai đoạn xác thực & độ tin cậy: xem giải thích đầy đủ ở generation.py — jitter
+# chống nhiều request đồng thời retry cùng lịch, đo thật ở ngày 25 (vault).
 _NETWORK_RETRY_JITTER_S = 0.5
 
 GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"

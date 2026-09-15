@@ -1,5 +1,6 @@
-"""D4: Xac thuc that bang API key, dong lo hong da do duoc o ngay 26 (vault) - truoc
-day AskRequest.role/department la truong du lieu tu khai, khong ai kiem chung ca.
+"""Giai doan xac thuc & do tin cay: Xac thuc that bang API key, dong lo hong da do
+duoc o ngay 26 (vault) - truoc day AskRequest.role/department la truong du lieu tu
+khai, khong ai kiem chung ca.
 
 Chi bam SHA-256 va so voi cot employees.api_key_hash (sql/06_auth.sql) - khong bao
 gio luu hoac log key dang plaintext. Xem scripts/issue_api_keys.py de cap key.
@@ -32,7 +33,8 @@ def authenticate(authorization_header: str | None) -> AuthenticatedEmployee:
     """Xac minh header ``Authorization: Bearer <api_key>``, tra ve danh tinh THAT.
 
     Day la nguon su that DUY NHAT cho role/department dung de RBAC - khong phai
-    truong role/department trong body request (xem ADR ve AuthN, D4).
+    truong role/department trong body request (xem ADR ve AuthN, giai doan xac thuc
+    & do tin cay).
     """
     if not authorization_header or not authorization_header.startswith("Bearer "):
         raise AuthenticationError("thieu hoac sai dinh dang header Authorization")

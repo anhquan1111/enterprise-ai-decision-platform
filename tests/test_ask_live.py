@@ -21,7 +21,8 @@ pytestmark = [pytest.mark.integration, pytest.mark.live_llm]
 def use_real_env_file(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ghi đè cách ly .env của conftest.py — file test này CẦN key thật để gọi Gemini.
 
-    conftest.py tắt việc đọc .env cho mọi test khác, đúng thiết kế D1 (một unit test
+    conftest.py tắt việc đọc .env cho mọi test khác, đúng thiết kế của giai đoạn tầng
+    dữ liệu (một unit test
     không được phụ thuộc máy nào chạy nó có .env gì). Test ở đây là ngoại lệ có chủ ý:
     nó chỉ chạy khi người gọi tự tay bật marker ``live_llm``, nên phụ thuộc `.env` thật
     là đúng ý định, không phải rò rỉ ngoài ý muốn.
@@ -54,8 +55,9 @@ def test_employee_is_correctly_denied_executive_only_answer() -> None:
 
 
 def test_agent_routes_docs_question_to_docs_tool() -> None:
-    """D3: router (Gemini thật) phải tự phân loại đúng một câu hỏi chính sách rõ ràng
-    là docs, không cần gợi ý — khác test ở test_agent_loop.py vốn mock route()."""
+    """Giai đoạn agent routing: router (Gemini thật) phải tự phân loại đúng một câu
+    hỏi chính sách rõ ràng là docs, không cần gợi ý — khác test ở test_agent_loop.py
+    vốn mock route()."""
     result = run_agent(
         "Neu mot ban release bi loi thi phai lam gi?", role="employee", department="engineering"
     )

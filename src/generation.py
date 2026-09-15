@@ -22,13 +22,15 @@ from src.retrieval import RetrievedChunk
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 _NETWORK_RETRY_ATTEMPTS = 3
 _NETWORK_RETRY_BACKOFF_S = 1.0
-# D4: jitter ngẫu nhiên cộng thêm vào backoff. Đo thật ở ngày 25 (vault):
-# nhiều request đồng thời retry theo ĐÚNG cùng lịch (1s, 2s, 4s...) có xu hướng va
-# lại rate limit ở cùng một thời điểm — 2/3 request đồng thời nhận 503 dù retry đã
-# chạy. Jitter làm các request retry lệch pha nhau, giảm khả năng va lại.
+# Giai đoạn xác thực & độ tin cậy: jitter ngẫu nhiên cộng thêm vào backoff. Đo thật
+# ở ngày 25 (vault): nhiều request đồng thời retry theo ĐÚNG cùng lịch (1s, 2s,
+# 4s...) có xu hướng va lại rate limit ở cùng một thời điểm — 2/3 request đồng thời
+# nhận 503 dù retry đã chạy. Jitter làm các request retry lệch pha nhau, giảm khả
+# năng va lại.
 _NETWORK_RETRY_JITTER_S = 0.5
-# D5 (ADR-020): timeout/mất kết nối khi GỌI httpx.post không phải là một status
-# code, nên trước đây thoát khỏi vòng retry ngay lập tức — phát hiện qua tập
+# Giai đoạn báo cáo cuối (ADR-020): timeout/mất kết nối khi GỌI httpx.post không
+# phải là một status code, nên trước đây thoát khỏi vòng retry ngay lập tức — phát
+# hiện qua tập
 # held-out (H02: "upstream call failed: The read operation timed out" -> 503
 # không hề thử lại). Coi hai lớp lỗi này tương đương lỗi status tạm thời.
 _NETWORK_LEVEL_RETRYABLE = (httpx.ConnectError, httpx.TimeoutException)
@@ -55,7 +57,8 @@ class Answer(BaseModel):
     answer: str = Field(min_length=1)
     citations: list[Citation]
     abstained: bool
-    # D5 (ADR-020): True khi model tự mâu thuẫn (abstained=true kèm citations) và
+    # Giai đoạn báo cáo cuối (ADR-020): True khi model tự mâu thuẫn (abstained=true
+    # kèm citations) và
     # citations bị bỏ để giữ tín hiệu abstained — xem model_validator bên dưới.
     self_contradiction_corrected: bool = False
 
@@ -118,8 +121,8 @@ def _call_gemini(prompt: str) -> tuple[str, str | None, int]:
 
     finish_reason được trả riêng vì một response rỗng do thinking ăn hết
     max_output_tokens vẫn là HTTP 200 — phải đọc finish_reason mới biết, xem ADR-002.
-    total_tokens (D5) đọc từ usageMetadata.totalTokenCount — dùng để báo chi phí thật
-    trong docs/report.md thay vì ước lượng.
+    total_tokens (giai đoạn báo cáo cuối) đọc từ usageMetadata.totalTokenCount —
+    dùng để báo chi phí thật trong docs/report.md thay vì ước lượng.
     """
     settings = get_settings()
     payload = {
@@ -146,8 +149,9 @@ def _call_gemini(prompt: str) -> tuple[str, str | None, int]:
                 json=payload,
             )
         except _NETWORK_LEVEL_RETRYABLE as exc:
-            # D5 (ADR-020): timeout/connect that ket noi khong phai loi HTTP status,
-            # nen khong roi vao nhanh ben duoi - truoc day thoat ngay khong retry.
+            # Giai doan bao cao cuoi (ADR-020): timeout/connect that ket noi khong
+            # phai loi HTTP status, nen khong roi vao nhanh ben duoi - truoc day
+            # thoat ngay khong retry.
             last_exc = exc
             response = None
         else:
@@ -195,7 +199,8 @@ def check_grounding(answer: Answer, allowed_chunk_ids: set[str]) -> list[str]:
     problems: list[str] = []
     if answer.self_contradiction_corrected:
         problems.append(
-            "model trả abstained=true kèm citations — đã tự động bỏ citations, giữ abstained (D5)"
+            "model trả abstained=true kèm citations — đã tự động bỏ citations, giữ "
+            "abstained (giai đoạn báo cáo cuối)"
         )
     for c in answer.citations:
         if c.chunk_id not in allowed_chunk_ids:

@@ -15,7 +15,8 @@ Ba số đo, và mỗi số trả lời một câu hỏi khác nhau:
 * **tuân schema** — bao nhiêu lần trả về JSON đúng hình dạng ngay lần đầu.
 * **bịa nguồn** — bao nhiêu lần citation trỏ tới chunk không có trong context.
 
-Script này KHÔNG đo chất lượng câu trả lời. Việc đó cần ground truth, và đó là D2.
+Script này KHÔNG đo chất lượng câu trả lời. Việc đó cần ground truth, và đó là việc
+của giai đoạn retrieval nền tảng.
 """
 
 import json

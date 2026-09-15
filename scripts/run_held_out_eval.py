@@ -1,7 +1,8 @@
-"""D5: chạy bộ 12 câu held-out (``eval/final.jsonl``) MỘT LẦN, qua HTTP thật tới
-``/ask`` đang chạy — không gọi thẳng ``run_agent()`` trong tiến trình, vì D5 cần đo
-đúng những gì D4 đã xây: xác thực thật, audit log thật, latency thật đo tại biên
-HTTP (không phải thời gian gọi hàm nội bộ).
+"""Giai đoạn báo cáo cuối: chạy bộ 12 câu held-out (``eval/final.jsonl``) MỘT LẦN, qua
+HTTP thật tới ``/ask`` đang chạy — không gọi thẳng ``run_agent()`` trong tiến trình,
+vì báo cáo cuối cần đo đúng những gì giai đoạn xác thực & độ tin cậy đã xây: xác thực
+thật, audit log thật, latency thật đo tại biên HTTP (không phải thời gian gọi hàm
+nội bộ).
 
     uv run python -m scripts.run_held_out_eval --keys-file <path to JSON: employee_id -> api key>
     uv run python -m scripts.run_held_out_eval --report      # đọc report đã có, không gọi gì
@@ -154,7 +155,8 @@ def score_one(question: dict[str, Any], ask_response: dict[str, Any]) -> dict[st
 
 
 def fetch_total_tokens(request_ids: list[str]) -> dict[str, int | None]:
-    """Đọc total_tokens thật từ audit_log (D5, xem ADR-018) — không ước lượng."""
+    """Đọc total_tokens thật từ audit_log (giai đoạn báo cáo cuối, xem ADR-018) —
+    không ước lượng."""
     if not request_ids:
         return {}
     rows = fetch_all(

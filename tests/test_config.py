@@ -40,8 +40,9 @@ def test_database_url_always_carries_a_connect_timeout() -> None:
 
 
 def test_database_url_always_carries_a_statement_timeout() -> None:
-    """D4: một câu SQL bất thường (kể cả do LLM sinh ra) không được treo vô hạn phía
-    server — khác connect_timeout (bảo vệ lúc MỞ connection), statement_timeout bảo
+    """Giai đoạn xác thực & độ tin cậy: một câu SQL bất thường (kể cả do LLM sinh
+    ra) không được treo vô hạn phía server — khác connect_timeout (bảo vệ lúc MỞ
+    connection), statement_timeout bảo
     vệ lúc CHẠY câu lệnh. Đo thật xác nhận ở vault ngày 25: khoảng trống này có thật.
     """
     url = Settings().database_url

@@ -138,7 +138,8 @@ CREATE TABLE ingest_run (
         CHECK (rows_accepted + rows_quarantined = rows_in_file)
 );
 
--- Tạo ở D1 để schema hoàn chỉnh; ghi vào nó là việc của D4.
+-- Tạo ở giai đoạn tầng dữ liệu để schema hoàn chỉnh; ghi vào nó là việc của giai
+-- đoạn xác thực & độ tin cậy.
 CREATE TABLE audit_log (
     audit_id          BIGSERIAL   PRIMARY KEY,
     request_id        UUID        NOT NULL,

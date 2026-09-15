@@ -1,6 +1,7 @@
-"""D4: bo test cach ly RBAC co he thong — ma tran day du, khong chi vai vi du rai
-rac. Gom lai tu hai duong quyen da co (docs theo access_level, SQL theo department)
-thanh mot noi kiem tra toan dien, dung du lieu nhan vien that (D1 seed).
+"""Giai doan xac thuc & do tin cay: bo test cach ly RBAC co he thong — ma tran day
+du, khong chi vai vi du rai rac. Gom lai tu hai duong quyen da co (docs theo
+access_level, SQL theo department) thanh mot noi kiem tra toan dien, dung du lieu
+nhan vien that (seed o giai doan tang du lieu).
 """
 
 from itertools import product
@@ -53,7 +54,7 @@ def test_unknown_role_is_denied_in_both_docs_and_sql_matrices() -> None:
     )
 
 
-# ── Cách ly thật trên dữ liệu thật (D1 seed) ────────────────────────
+# ── Cách ly thật trên dữ liệu thật (seed ở giai đoạn tầng dữ liệu) ──
 
 
 @pytest.mark.integration
@@ -77,7 +78,8 @@ def test_manager_never_retrieves_executive_only_chunks() -> None:
 @pytest.mark.integration
 def test_seeded_employees_in_different_departments_are_isolated() -> None:
     """emp_001 (sales/employee) và emp_003 (finance/employee) — hai nhân viên THẬT đã
-    seed ở D1 — không được phép xem số liệu của phòng ban nhau. Vòng lặp xác thực
+    seed ở giai đoạn tầng dữ liệu — không được phép xem số liệu của phòng ban nhau.
+    Vòng lặp xác thực
     thật bằng API key thật đã kiểm riêng ở test_auth_integration.py; ở đây kiểm đúng
     ranh giới ADR-012 áp dụng cho đúng hai phòng ban thật đang tồn tại trong seed."""
     assert (

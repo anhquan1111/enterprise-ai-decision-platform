@@ -4,7 +4,7 @@
 
 * **Schema hợp lệ** — Pydantic kiểm (hình dạng, kiểu, tập giá trị cho phép).
 * **Nội dung đúng** — KHÔNG kiểm ở đây. Một response có thể đúng schema mà vẫn trả
-  lời sai; đó là việc của bộ đánh giá ở D2.
+  lời sai; đó là việc của bộ đánh giá ở giai đoạn retrieval nền tảng.
 """
 
 from enum import StrEnum

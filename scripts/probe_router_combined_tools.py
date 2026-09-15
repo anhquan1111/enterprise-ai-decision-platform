@@ -1,4 +1,4 @@
-"""D5 follow-up (ADR-020): đo router.route() có chọn đúng CẢ HAI tool cho câu hỏi
+"""Theo dõi giai đoạn báo cáo cuối (ADR-020): đo router.route() có chọn đúng CẢ HAI tool cho câu hỏi
 kết hợp sql+docs hay không, sau khi sửa SYSTEM_INSTRUCTION (checklist độc lập +
 một ví dụ minh hoạ). Gọi Gemini thật.
 

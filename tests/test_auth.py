@@ -1,8 +1,8 @@
 """Test cho src/auth.py — mock fetch_one, khong cham database that.
 
-D4: dong lo hong AuthN da do o vault ngay 26 (AskRequest.role/department la truong tu
-khai, khong ai kiem chung). Test o day dam bao lop xac thuc that su chan dung, khong
-chi ton tai tren giay.
+Giai doan xac thuc & do tin cay: dong lo hong AuthN da do o vault ngay 26
+(AskRequest.role/department la truong tu khai, khong ai kiem chung). Test o day dam
+bao lop xac thuc that su chan dung, khong chi ton tai tren giay.
 """
 
 import hashlib

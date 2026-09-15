@@ -1,7 +1,8 @@
 """FastAPI application.
 
-Phạm vi hiện tại (D4): /ask yêu cầu xác thực thật (API key, `src/auth.py`) — role/
-department dùng cho RBAC lấy từ danh tính đã xác thực, KHÔNG phải trường tự khai
+Phạm vi hiện tại (giai đoạn xác thực & độ tin cậy): /ask yêu cầu xác thực thật (API
+key, `src/auth.py`) — role/department dùng cho RBAC lấy từ danh tính đã xác thực,
+KHÔNG phải trường tự khai
 trong body (lỗ hổng đã đo và ghi lại ở vault ngày 26, xem ADR về AuthN). Mỗi request
 được ghi vào audit_log (`src/audit.py`) và đo bằng Prometheus (`src/metrics.py`,
 `/metrics`). Router (Gemini JSON mode) quyết định tool SQL/docs, RBAC kiểm trước khi
@@ -71,8 +72,9 @@ def ready() -> JSONResponse:
 
 @app.get("/metrics", tags=["ops"])
 def metrics() -> Response:
-    """Prometheus scrape endpoint (D4). Không cần xác thực — đúng quy ước Prometheus
-    thông thường (bảo vệ bằng network policy/reverse proxy, không phải app-level auth)."""
+    """Prometheus scrape endpoint (giai đoạn xác thực & độ tin cậy). Không cần xác
+    thực — đúng quy ước Prometheus thông thường (bảo vệ bằng network
+    policy/reverse proxy, không phải app-level auth)."""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
@@ -101,7 +103,8 @@ _TOOL_USED_MAP = {
 
 @app.post("/ask", response_model=AskResponse, tags=["qa"])
 def ask(request: AskRequest, authorization: str | None = Header(default=None)) -> JSONResponse:
-    """Trả lời câu hỏi bằng agent 2 tool (D3), sau khi xác thực thật (D4).
+    """Trả lời câu hỏi bằng agent 2 tool (giai đoạn agent routing), sau khi xác thực
+    thật (giai đoạn xác thực & độ tin cậy).
 
     Thứ tự bắt buộc: xác thực (ai gọi đây, THẬT SỰ) → đối chiếu role/department
     request khớp với danh tính đã xác thực → agent (router chọn SQL/docs/cả hai,
@@ -154,7 +157,8 @@ def ask(request: AskRequest, authorization: str | None = Header(default=None)) -
 
     try:
         # Dùng role/department từ danh tính ĐÃ XÁC THỰC, không dùng trường request —
-        # đây là nguồn sự thật duy nhất cho RBAC từ D4 trở đi (xem ADR về AuthN).
+        # đây là nguồn sự thật duy nhất cho RBAC từ giai đoạn xác thực & độ tin cậy
+        # trở đi (xem ADR về AuthN).
         result = run_agent(
             request.question,
             role=employee.role,

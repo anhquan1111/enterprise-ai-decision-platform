@@ -38,7 +38,9 @@ def test_route_docs_only(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.plan.tools == ["docs"]
     assert result.plan.sql_args is None
-    assert result.total_tokens == 123  # D5: token thật đọc từ usageMetadata, không đoán
+    assert (
+        result.total_tokens == 123
+    )  # giai đoạn báo cáo cuối: token thật đọc từ usageMetadata, không đoán
 
 
 def test_route_sql_with_args(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -71,7 +73,9 @@ def test_route_retries_after_malformed_json_then_succeeds(monkeypatch: pytest.Mo
 
     assert result.plan.tools == ["docs"]
     assert len(calls) == 2
-    assert result.total_tokens == 100  # D5: cả 2 lượt gọi đều tốn tiền, phải cộng dồn
+    assert (
+        result.total_tokens == 100
+    )  # giai đoạn báo cáo cuối: cả 2 lượt gọi đều tốn tiền, phải cộng dồn
 
 
 def test_route_raises_after_schema_retry_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,7 +86,8 @@ def test_route_raises_after_schema_retry_exhausted(monkeypatch: pytest.MonkeyPat
     with pytest.raises(RouterSchemaFailure) as exc_info:
         route("cau hoi bat ky")
 
-    # D5: dù cuối cùng thất bại, hai lượt gọi đã thử vẫn tốn tiền thật — không phải 0.
+    # Giai đoạn báo cáo cuối: dù cuối cùng thất bại, hai lượt gọi đã thử vẫn tốn
+    # tiền thật — không phải 0.
     assert exc_info.value.total_tokens == 80
 
 
@@ -97,7 +102,7 @@ def test_route_retries_transient_network_error(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_route_retries_after_real_timeout_exception(monkeypatch: pytest.MonkeyPatch) -> None:
-    """D5 (ADR-020): httpx.TimeoutException khi GOI httpx.post khong phai status
+    """Giai doan bao cao cuoi (ADR-020): httpx.TimeoutException khi GOI httpx.post khong phai status
     code, trước đây thoát ngay không retry (held-out H02, xem ADR-019)."""
     monkeypatch.setattr("src.agent.router._NETWORK_RETRY_BACKOFF_S", 0.0)
     calls: list[str] = []

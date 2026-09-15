@@ -16,8 +16,9 @@ from psycopg_pool import ConnectionPool
 
 from src.config import get_settings
 
-# D4: pool thay vì mở connection mới mỗi lần gọi — chi phí mở connection mới đo được
-# thật ở ngày 25 (vault, ~13ms/lần), nhỏ so với gọi Gemini nhưng không miễn phí, và
+# Giai đoạn xác thực & độ tin cậy: pool thay vì mở connection mới mỗi lần gọi — chi
+# phí mở connection mới đo được thật ở ngày 25 (vault, ~13ms/lần), nhỏ so với gọi
+# Gemini nhưng không miễn phí, và
 # là chi phí trả THÊM một lần nữa cho mỗi request khi không dùng lại.
 #
 # Singleton module-level có chủ ý: một pool dùng chung cho cả process, không phải

@@ -23,11 +23,13 @@ from .schema import ToolPlan
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 _NETWORK_RETRY_ATTEMPTS = 3
 _NETWORK_RETRY_BACKOFF_S = 1.0
-# D4: xem giải thích đầy đủ ở generation.py — đo thật ở ngày 25 (vault) cho thấy
-# nhiều request đồng thời retry cùng lịch làm giảm hiệu quả phục hồi khi rate limit.
+# Giai đoạn xác thực & độ tin cậy: xem giải thích đầy đủ ở generation.py — đo thật ở
+# ngày 25 (vault) cho thấy nhiều request đồng thời retry cùng lịch làm giảm hiệu quả
+# phục hồi khi rate limit.
 _NETWORK_RETRY_JITTER_S = 0.5
-# D5 (ADR-020): timeout/mất kết nối không phải status code, không tự rơi vào nhánh
-# retry ở dưới — xem giải thích đầy đủ ở generation.py (phát hiện qua held-out H02).
+# Giai đoạn báo cáo cuối (ADR-020): timeout/mất kết nối không phải status code,
+# không tự rơi vào nhánh retry ở dưới — xem giải thích đầy đủ ở generation.py (phát
+# hiện qua held-out H02).
 _NETWORK_LEVEL_RETRYABLE = (httpx.ConnectError, httpx.TimeoutException)
 _SCHEMA_RETRY_ATTEMPTS = 2
 
@@ -67,9 +69,9 @@ class RouterSchemaFailure(Exception):
     """Router trả sai định dạng ở mọi lần thử — không đoán bừa nên tool nào, dừng rõ
     ràng để tầng gọi (agent loop) quyết định abstain, không phải fallback sang docs.
 
-    Mang theo total_tokens (D5): các lượt gọi đã thử đều tốn tiền thật dù cuối cùng
-    thất bại — tầng gọi cần con số này để hạch toán chi phí đúng, không chỉ tính
-    token trên đường thành công.
+    Mang theo total_tokens (giai đoạn báo cáo cuối): các lượt gọi đã thử đều tốn tiền
+    thật dù cuối cùng thất bại — tầng gọi cần con số này để hạch toán chi phí đúng,
+    không chỉ tính token trên đường thành công.
     """
 
     def __init__(self, message: str, total_tokens: int = 0) -> None:
@@ -79,7 +81,7 @@ class RouterSchemaFailure(Exception):
 
 @dataclass(frozen=True)
 class RouterResult:
-    """Bọc ToolPlan cùng chi phí token thật của lần gọi router (D5) — tách khỏi
+    """Bọc ToolPlan cùng chi phí token thật của lần gọi router (giai đoạn báo cáo cuối) — tách khỏi
     ToolPlan vì đó là schema phản ánh đúng hợp đồng JSON với Gemini, không phải chỗ
     để nhét thêm metadata đo lường."""
 

@@ -1,5 +1,5 @@
-"""Vong lap agent D3: router quyet dinh tool, RBAC kiem truoc thuc thi, thuc thi co
-retry/timeout, roi tong hop cau tra loi cuoi.
+"""Vong lap agent giai doan agent routing: router quyet dinh tool, RBAC kiem truoc
+thuc thi, thuc thi co retry/timeout, roi tong hop cau tra loi cuoi.
 
 Khac vong lap ReAct nhieu buoc day du (day hoc Ngay 22, Agent_Loop_&_Tool_Use): kien
 truc /ask chi co dung 2 tool co dinh va MOT quyet dinh phan loai duy nhat (router.py),
@@ -14,7 +14,8 @@ khong co bang chung nao.
 Quyet dinh co chu y: KHONG dua so lieu SQL qua LLM de "dien dat lai". So lieu tra ve
 tu database da la su thuc chinh xac; de LLM viet lai co nguy co dien sai/dien them —
 mot rui ro hoan toan khong can thiet khi van ban that da co san. Phan docs (chinh
-sach, can dien giai tu ngu canh) van di qua generation.answer_question() nhu D2.
+sach, can dien giai tu ngu canh) van di qua generation.answer_question() nhu giai
+doan retrieval nen tang.
 """
 
 from collections.abc import Callable
@@ -66,17 +67,19 @@ def _retry[**P, T](fn: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
 
 
 def run_agent(question: str, *, role: str, department: str, k: int = 5) -> AgentAnswer:
-    """Điểm vào duy nhất của agent D3. Không bao giờ ném lỗi RBAC/nghiệp vụ ra ngoài —
-    chúng được chuyển thành ``abstained=True`` có lý do rõ ràng. Lỗi hạ tầng (mạng,
-    schema router hỏng sau khi hết retry) VẪN được ném ra để tầng API (``api.py``)
-    trả đúng mã lỗi 502/503, giống hành vi đã có ở D2 cho generation.
+    """Điểm vào duy nhất của agent ở giai đoạn agent routing. Không bao giờ ném lỗi
+    RBAC/nghiệp vụ ra ngoài — chúng được chuyển thành ``abstained=True`` có lý do rõ
+    ràng. Lỗi hạ tầng (mạng, schema router hỏng sau khi hết retry) VẪN được ném ra để
+    tầng API (``api.py``) trả đúng mã lỗi 502/503, giống hành vi đã có ở giai đoạn
+    retrieval nền tảng cho generation.
     """
     try:
         router_result: RouterResult = route(question)
     except RouterSchemaFailure as exc:
         # Router không phân loại được câu hỏi ở mọi lần thử. Không đoán bừa tool nào
-        # — coi như không có bằng chứng, giống hành vi 0-chunk đã có ở D2. Các lượt
-        # gọi đã thử vẫn tốn tiền thật (D5) dù cuối cùng thất bại — exc.total_tokens
+        # — coi như không có bằng chứng, giống hành vi 0-chunk đã có ở giai đoạn
+        # retrieval nền tảng. Các lượt gọi đã thử vẫn tốn tiền thật (giai đoạn báo
+        # cáo cuối) dù cuối cùng thất bại — exc.total_tokens
         # giữ lại con số đó thay vì báo 0 sai sự thật.
         return AgentAnswer(
             answer="Khong xac dinh duoc cau hoi nay can tra cuu so lieu hay tai lieu nao.",
@@ -133,8 +136,8 @@ def _summarize(
     if docs_chunks:
         docs_grounded = answer_question(question, docs_chunks)  # có thể raise SchemaFailure
 
-    # D5: chi phí token thật của MỘT request /ask = router + (docs generation nếu có
-    # dùng). sql_tool không gọi LLM nên không cộng thêm gì.
+    # Giai đoạn báo cáo cuối: chi phí token thật của MỘT request /ask = router +
+    # (docs generation nếu có dùng). sql_tool không gọi LLM nên không cộng thêm gì.
     total_tokens = router_tokens + (docs_grounded.total_tokens if docs_grounded else 0)
 
     has_docs_answer = docs_grounded is not None and not docs_grounded.answer.abstained

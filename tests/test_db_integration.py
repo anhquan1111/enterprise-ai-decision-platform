@@ -21,4 +21,4 @@ def test_postgres_is_reachable_and_has_pgvector() -> None:
         "SELECT extname FROM pg_extension WHERE extname = %(name)s",
         {"name": "vector"},
     )
-    assert rows, "pgvector extension is not installed — run sql/00_schema.sql (D1)"
+    assert rows, "pgvector extension is not installed — run sql/00_schema.sql (data-layer phase)"
