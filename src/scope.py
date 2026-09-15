@@ -27,3 +27,19 @@ def visible_access_levels(role: str) -> list[str]:
     không cho thấy gì, chứ không đoán.
     """
     return list(ROLE_VISIBLE_LEVELS.get(role, ()))
+
+
+def can_query_department(*, role: str, caller_department: str, target_department: str) -> bool:
+    """Ranh giới quyền cho tool SQL (D3) — khác ranh giới của docs retrieval (ADR-009).
+
+    ADR-009 đã chốt: doanh thu một phòng ban là số liệu phòng ban đó sở hữu, một nhân
+    viên phòng khác không cần thấy nó ở dạng số thô. Quyết định cụ thể (ADR-011):
+    ``employee``/``manager`` chỉ xem được phòng ban của chính mình; ``executive`` xem
+    được mọi phòng ban (giám sát toàn công ty). Role lạ luôn bị chặn — không đoán quyền
+    cho một role hệ thống không biết, giống nguyên tắc của ``visible_access_levels``.
+    """
+    if role == "executive":
+        return True
+    if role in ("employee", "manager"):
+        return caller_department == target_department
+    return False

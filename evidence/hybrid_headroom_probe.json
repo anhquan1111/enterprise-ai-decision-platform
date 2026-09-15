@@ -1,0 +1,76 @@
+{
+  "n_probes": 5,
+  "recall_at_3": "5/5",
+  "results": [
+    {
+      "question": "Khi mot phien ban phan mem gap su co ngay sau khi phat hanh, quy trinh khac phuc la gi?",
+      "role": "employee",
+      "gold_chunk_id": "ENG-007#1",
+      "existing_similar": "Q09/F01_seen_at_d2 (dung chung 'release', 'loi')",
+      "top_ids": [
+        "ENG-007#1",
+        "ENG-007#0",
+        "FIN-014#0",
+        "HR-001#0",
+        "HR-001#1"
+      ],
+      "rank_of_gold": 1
+    },
+    {
+      "question": "Truoc khi mot nguoi duoc nhan vao lam, ho can trai qua bao nhieu buoc danh gia chuyen mon?",
+      "role": "manager",
+      "gold_chunk_id": "HR-002#1",
+      "existing_similar": "Q13/F03_seen_at_d2 (dung chung 'vong phong van ky thuat')",
+      "top_ids": [
+        "HR-002#1",
+        "ENG-007#0",
+        "FIN-014#0",
+        "HR-002#0",
+        "HR-001#0"
+      ],
+      "rank_of_gold": 1
+    },
+    {
+      "question": "So lieu doanh thu khi chua duoc xac nhan chinh thuc thi co the chia se voi doi tac ben ngoai khong?",
+      "role": "manager",
+      "gold_chunk_id": "FIN-020#1",
+      "existing_similar": "Q07 (dung chung 'tam tinh')",
+      "top_ids": [
+        "FIN-020#1",
+        "FIN-020#0",
+        "ENG-012#0",
+        "HR-002#1",
+        "FIN-014#0"
+      ],
+      "rank_of_gold": 1
+    },
+    {
+      "question": "Cong ty co dinh dua san pham ra kinh doanh o quoc gia khac trong tuong lai gan khong?",
+      "role": "executive",
+      "gold_chunk_id": "SAL-011#0",
+      "existing_similar": "Q16 (dung chung 'ke hoach mo rong thi truong 2027')",
+      "top_ids": [
+        "SAL-011#0",
+        "FIN-014#0",
+        "HR-002#1",
+        "FIN-014#1",
+        "ENG-007#0"
+      ],
+      "rank_of_gold": 1
+    },
+    {
+      "question": "Khi mot nhan su ngung tham gia mot cong viec, ho con duoc phep xem thong tin cua khach hang lien quan khong?",
+      "role": "manager",
+      "gold_chunk_id": "ENG-012#0",
+      "existing_similar": "Q10/Q11 (dung chung 'quyen truy cap du lieu khach hang')",
+      "top_ids": [
+        "ENG-012#0",
+        "SAL-009#0",
+        "HR-001#1",
+        "ENG-007#0",
+        "HR-001#0"
+      ],
+      "rank_of_gold": 1
+    }
+  ]
+}
