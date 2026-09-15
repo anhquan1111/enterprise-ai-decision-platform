@@ -1,85 +1,220 @@
 # Enterprise AI Decision Platform (Tiếng Việt)
 
-API hỏi đáp nội bộ cho doanh nghiệp: nhân viên hỏi bằng ngôn ngữ tự nhiên, hệ
-thống tự quyết định câu trả lời nằm ở **số liệu kinh doanh (SQL)** hay **tài liệu
-quy trình nội bộ (retrieval)**, rồi trả lời **kèm trích dẫn nguồn**, **chỉ trong
-phạm vi quyền của người hỏi**, và **ghi nhật ký kiểm toán** mọi lượt truy vấn.
+API hỏi đáp nội bộ cho doanh nghiệp: nhân viên hỏi bằng ngôn ngữ tự nhiên, hệ thống tự quyết định câu trả lời nằm ở **số liệu kinh doanh (SQL)** hay **tài liệu quy trình nội bộ (retrieval)**, rồi trả lời **kèm trích dẫn nguồn**, **chỉ trong phạm vi quyền của người hỏi**, và **ghi nhật ký kiểm toán (audit log)** cho mọi lượt truy vấn.
 
-> **Trạng thái: D0 — mới dựng khung.** Dịch vụ khởi động được, báo liveness và
-> readiness, và đã áp contract cho `/ask`. Đường trả lời chưa implement: `/ask`
-> trả `501` một cách có chủ ý, thay vì trả một câu trả lời giả trông như thật.
-> Lộ trình và tiến độ ở [`AGENTS.md`](AGENTS.md#7-session-plan-d0--d5).
+> **Trạng thái: báo cáo cuối cùng trên tập held-out độc lập.** Một tập câu hỏi held-out hoàn toàn mới gồm 12 câu (`eval/final.jsonl`) đã được chạy **đúng một lần** qua endpoint `/ask` thật đang chạy với cơ chế xác thực thật — 9/12 câu đúng, 2 lỗi hạ tầng mạng/dịch vụ, 1 lỗi phân loại router, và không một lỗi nào bị vá giữa chừng (vì làm vậy sẽ làm mất đi ý nghĩa của một tập held-out độc lập). Độ trễ thật p50/p95 và chi phí token thật cho mỗi request được đo trực tiếp từ `audit_log` lần đầu tiên (cột `total_tokens` tồn tại nhưng chưa từng được ghi cho tới lúc này — xem ADR-018). Chi tiết toàn bộ kết quả, 3 lỗi thật phát hiện được và lý do giữ nguyên không sửa cho tới khi chấm xong: [`docs/report.md`](docs/report.md) (mục held-out) và ADR-019.
+>
+> Endpoint `/ask` yêu cầu API key thật (`Authorization: Bearer <key>`) — RBAC chạy dựa trên role/department **đã được xác thực**, không dùng trường tự khai báo trong body request, đóng một lỗ hổng bảo mật thật đã được kiểm chứng bằng thực nghiệm (ADR-015, có log `curl` trước/sau trong `docs/report.md`). Mọi request đều được ghi vào `audit_log` và expose tại `/metrics` (Prometheus). `/ask` định tuyến từng câu hỏi (Gemini phân loại `sql` / `docs` / cả hai) và trả về số liệu SQL nguyên bản, tuyệt đối không để LLM diễn giải lại. Baseline retrieval: 18/18 câu hỏi có đáp án được trích xuất chính xác, 0 trích dẫn bịa đặt, 0 vi phạm quyền trên 25 câu dev; hybrid retrieval đã được đo đạc trước và **quyết định không xây dựng** — đạt 5/5 recall trên 5 câu diễn giải khó, không có khoảng trống nào cần bù đắp (ADR-011). Trình tự xây dựng và tiến độ: [`AGENTS.md`](AGENTS.md#7-kế-hoạch-xây-dựng). Hướng dẫn thứ tự đọc chi tiết toàn bộ dự án có tại [`docs/reading_order.md`](docs/reading_order.md).
 
 ## Vì sao làm project này
 
-Ba tính chất quyết định một trợ lý LLM có dùng được trong doanh nghiệp hay
-không, và cả ba thường thiếu trong các bản demo:
+Ba tính chất quyết định một trợ lý LLM có thực sự dùng được trong doanh nghiệp hay không, và cả ba thường thiếu trong các bản demo thông thường:
 
 | Tính chất | Nghĩa cụ thể trong repo này |
 |---|---|
-| **Câu trả lời kiểm chứng được** | Mọi claim đều có citation — một chunk tài liệu, hoặc chính câu SQL đã tạo ra con số. Câu trả lời không truy nguồn được bị coi là thất bại, không phải thành công. |
-| **Phân quyền thật sự có hiệu lực** | Scope được áp bằng filter trong `WHERE` của SQL và trong truy vấn retrieval, **trước khi** bất kỳ text nào tới model. Model không bao giờ nhìn thấy chunk mà người hỏi không được đọc. Dặn model "đừng tiết lộ tài liệu mật" chỉ là một lời dặn, không phải một ranh giới. |
-| **Đo chứ không tuyên bố** | Mọi thay đổi retrieval được đánh giá trên một bộ câu hỏi cố định, với baseline đo trước. "Hybrid search tốt hơn" chỉ là một khẳng định nếu có số đứng sau. |
+| **Câu trả lời kiểm chứng được** | Mọi luận điểm trả về đều phải có trích dẫn (citation) — một chunk tài liệu hoặc chính câu lệnh SQL đã sinh ra con số. Một câu trả lời không thể truy nguyên nguồn gốc bị coi là thất bại, không phải thành công. |
+| **Phân quyền thật sự có hiệu lực** | Phạm vi quyền (Scope) được áp bằng bộ lọc trực tiếp trong mệnh đề `WHERE` của SQL và truy vấn vector, **trước khi** bất kỳ văn bản nào chạm tới mô hình LLM. Mô hình không bao giờ nhìn thấy chunk tài liệu mà người hỏi không được phép đọc. Việc dặn mô hình "đừng tiết lộ tài liệu mật" chỉ là một lời dặn (instruction), không phải một ranh giới bảo mật (boundary). |
+| **Đo lường chứ không tuyên bố** | Mọi thay đổi trong retrieval đều được đánh giá trên một bộ câu hỏi cố định, với baseline được đo trước. Khẳng định "Hybrid search tốt hơn" chỉ có giá trị khi có số liệu thực nghiệm chứng minh. |
 
-## Chạy thử
+## Kiến trúc hệ thống
 
-Cần: Docker, [uv](https://docs.astral.sh/uv/), Python 3.12.
+```mermaid
+flowchart TB
+    U["Người gọi: Authorization: Bearer API key"] --> API["POST /ask"]
+    API --> AUTH["Xác thực: key -> nhân viên thật"]
+    AUTH -->|Key thiếu/không hợp lệ| R401["401/403 — Không chạm tới dữ liệu"]
+    AUTH --> AG["Router: tool nào trả lời được? (role/department đã xác thực)"]
+    AG -->|Số liệu| T1["SQL tool: tham số hoá, read-only"]
+    AG -->|Quy định/chính sách| T2["Docs tool: dense retrieval, lọc theo scope"]
+    AG -->|Cả hai| T3["Dùng cả hai tool"]
+    T1 --> DB[("PostgreSQL 17 + pgvector, connection pool")]
+    T2 --> DB
+    T1 --> GEN["Generation: structured output"]
+    T2 --> GEN
+    T3 --> GEN
+    GEN --> VAL["Validator: kiểm tra schema + mọi luận điểm đều có trích dẫn"]
+    VAL -->|Không có bằng chứng| ABS["abstained = true"]
+    VAL --> OUT["AskResponse JSON"]
+    OUT --> AUD["Ghi audit_log + Prometheus metrics"]
+```
+
+Chi tiết kiến trúc: [`docs/architecture.md`](docs/architecture.md).  
+Các quyết định kỹ thuật và lý do: [`docs/decisions.md`](docs/decisions.md).
+
+## Khởi động nhanh
+
+Yêu cầu: Docker, [uv](https://docs.astral.sh/uv/), Python 3.12.
 
 ```bash
 git clone https://github.com/anhquan1111/enterprise-ai-decision-platform.git
 cd enterprise-ai-decision-platform
 cp .env.example .env
+# Dán API key từ Google AI Studio vào LLM_API_KEY — dùng cho embedding và generation
 
 uv sync --extra dev
 docker compose up -d db
+
+# Khởi tạo schema, nạp dữ liệu nghiệp vụ, sau đó nạp corpus tài liệu
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/00_extensions.sql
+docker compose exec -T db psql -U app -d enterprise_ai -f /sql/01_schema.sql
+docker compose exec -T db psql -U app -d enterprise_ai -f /sql/02_seed.sql
+docker compose exec -T db psql -U app -d enterprise_ai -f /sql/06_auth.sql
+uv run python -m scripts.ingest
+uv run python -m scripts.backfill_embeddings    # tính embedding cho 16 chunk, idempotent
+uv run python -m scripts.issue_api_keys         # cấp API key thật cho từng nhân viên, in ĐÚNG MỘT LẦN
 
 uv run uvicorn src.api:app --reload --port 8010
-# http://127.0.0.1:8010/docs
+# Xem tài liệu API tại: http://127.0.0.1:8010/docs
 ```
 
-Kiểm tra:
+Thử đặt câu hỏi (cần lấy API key thật từ kết quả của `issue_api_keys` — `/ask` yêu cầu header `Authorization: Bearer <key>`; nếu thiếu key hoặc khai báo role không khớp với chủ sở hữu key, request bị từ chối ngay trước khi đụng vào dữ liệu — xem [`docs/report.md`](docs/report.md) mục xác thực & độ tin cậy):
 
 ```bash
-curl http://127.0.0.1:8010/health    # liveness, không gọi DB
-curl http://127.0.0.1:8010/ready     # readiness, có kiểm PostgreSQL
-uv run pytest tests/ -v -m "not integration"
-uv run pytest tests/ -v -m integration    # cần container db đang chạy
+KEY="<dán key của emp_006 vào đây — engineering/employee>"
+
+# 1. Câu hỏi hợp lệ trong phạm vi quyền:
+curl -s -X POST http://127.0.0.1:8010/ask -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $KEY" -d '{
+  "user_id": "emp_006", "role": "employee", "department": "engineering",
+  "question": "Neu mot ban release bi loi thi phai lam gi?"
+}'
+# Hệ thống route tới docs tool, trích dẫn ENG-007#1. 
+# Nếu hỏi câu tương tự về hạn mức chi tiêu chỉ dành cho executive, hệ thống sẽ abstain thay vì đoán mò.
+
+# 2. Thử giả mạo quyền (role không khớp với key đã cấp):
+curl -s -X POST http://127.0.0.1:8010/ask -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $KEY" -d '{
+  "user_id": "emp_006", "role": "executive", "department": "finance",
+  "question": "Doanh thu phong finance thang 1 nam 2026 la bao nhieu?"
+}'
+# Trả về 403 Forbidden — key thuộc về "employee" phòng "engineering", role/department tự khai báo trong body
+# không khớp với danh tính thực của key, nên request không bao giờ chạm tới agent. 
+# Phân quyền RBAC luôn lấy từ key đã xác thực, không bao giờ tin dữ liệu body.
 ```
 
-Nếu dùng Git Bash, thêm `MSYS_NO_PATHCONV=1` trước lệnh `docker compose exec`,
-nếu không đường dẫn `/sql/...` sẽ bị đổi thành đường dẫn Windows.
+Xem cơ chế Data Contract chặn dữ liệu lỗi như thế nào mà không ảnh hưởng tới corpus sạch:
 
-## Kiến trúc
+```bash
+uv run python -m scripts.ingest data/documents_dirty.csv
+# 8 dòng nạp vào, 0 dòng hợp lệ, 8 dòng bị đưa vào quarantine — mỗi dòng đều có reject_reason rõ ràng
+```
 
-Sơ đồ và giải thích đầy đủ: [`docs/architecture.md`](docs/architecture.md).
-Các quyết định thiết kế và lý do: [`docs/decisions.md`](docs/decisions.md).
+Kiểm tra hệ thống:
 
-Điểm quan trọng nhất: **phân quyền nằm ở tầng truy vấn dữ liệu, không nằm trong
-prompt.** Đây là lý do prompt injection trong một tài liệu được truy xuất không
-mở rộng được phạm vi dữ liệu mà người hỏi nhìn thấy.
+```bash
+curl http://127.0.0.1:8010/health    # Liveness check, không gọi DB
+curl http://127.0.0.1:8010/ready     # Readiness check, có kiểm tra kết nối PostgreSQL
+curl http://127.0.0.1:8010/metrics   # Endpoint scrape metrics của Prometheus, không yêu cầu auth
+uv run pytest tests/ -v -m "not integration and not live_llm"   # Chạy nhanh, không cần mạng/DB
+uv run pytest tests/ -v -m integration                          # Cần container db đang chạy
+uv run pytest tests/ -v -m live_llm                              # Gọi Gemini thật, tiêu tốn quota
+uv run python -m scripts.run_eval --report                       # Đọc báo cáo baseline đã có, không tốn quota
+```
 
-## Đánh giá
+## Tech stack
 
-Số chỉ xuất hiện trong README khi nó đã tồn tại, và mỗi số trỏ về một file trong
-`evidence/`. Kế hoạch đã chốt trước:
+Python 3.12 · FastAPI · PostgreSQL 17 + pgvector 0.8.6 · psycopg 3 (raw SQL, không dùng ORM, quản lý pool kết nối qua `psycopg_pool`) · Pydantic 2 · Gemini (`gemini-3.1-flash-lite` cho generation và agent router, `gemini-embedding-001` ở 384 chiều) gọi qua `httpx` thuần (không dùng SDK, không dùng function-calling API — router dùng JSON mode tương tự generation) · prometheus-client (metrics) · pytest · ruff · mypy · Docker Compose · GitHub Actions. MLflow được khai báo sẵn dưới dạng optional extra; chưa dùng tới. BM25 / hybrid retrieval đã được đánh giá khi xây agent và chủ động không xây dựng — xem ADR-011 trong [`docs/decisions.md`](docs/decisions.md).
 
-- Khoảng **40 câu hỏi tự viết** có ground truth (doc id đúng), chia **28 câu
-  dev** và **12 câu held-out** giữ nguyên tới lần chạy cuối.
-- Retrieval đo bằng recall@5 và MRR. Answer đo bằng tính đúng của citation và
-  khả năng **abstain** đúng lúc khi corpus (hoặc phạm vi quyền) không có đáp án.
-- **Luôn báo số ca tuyệt đối kèm phần trăm.** Trên 28 câu, một câu là ~3,6% —
-  nằm trong nhiễu, và sẽ được ghi rõ là nhiễu.
+## Cấu trúc thư mục
 
-## Giới hạn
+```text
+src/
+├── api.py             # FastAPI app: /health, /ready, /metrics, /ask
+├── config.py          # Settings nạp từ env/.env
+├── contracts.py       # Data contract: định nghĩa luật, mức nghiêm trọng (FATAL/WARNING)
+├── db.py              # psycopg helpers, connection pool + statement timeout
+├── auth.py            # Ánh xạ API key -> nhân viên đã xác thực (AuthN thật)
+├── audit.py           # Ghi audit_log (bảng tồn tại một thời gian trước khi được dùng thật)
+├── metrics.py         # Prometheus counters/histogram cho /ask
+├── embeddings.py      # Gọi Gemini embedding, 1 hàm dùng chung cho ingest và query
+├── retrieval.py        # Dense retrieval: lọc scope + point-in-time, sau đó xếp hạng cosine
+├── generation.py      # Structured output: JSON mode, cơ chế retry khi lỗi, 2 cổng kiểm tra
+├── eval_taxonomy.py    # Phân loại 8 nhãn lỗi (access / knowledge / retrieval / generation)
+├── scope.py           # Phân quyền: Role -> access levels (docs); role+dept -> quyền SQL
+├── agent/             # router + 2 tools + pipeline điều phối có giới hạn (bounded loop)
+│   ├── router.py         # Gemini JSON mode: phân loại sql / docs / cả hai
+│   ├── tools.py           # sql_tool (kiểm tra RBAC trước query), docs_tool (bọc retrieval.py)
+│   ├── schema.py          # ToolPlan / SqlArgs, kiểm định hai lớp
+│   └── loop.py            # route -> RBAC -> thực thi (retry/timeout) -> tổng hợp câu trả lời
+└── schemas.py          # Contract dữ liệu request/response
 
-- Corpus là **dữ liệu tổng hợp** tự viết cho project. Không dùng tài liệu thật
-  của bất kỳ công ty nào.
-- Vector search dạng exact, chưa có ANN index. Đúng ở quy mô vài trăm chunk,
-  không phải một tuyên bố về khả năng mở rộng.
-- Bộ 40 câu là quy mô học tập. Đủ để định vị lỗi và so sánh hai cấu hình, **không
-  đủ** để kết luận hệ thống đáng tin cậy ở mọi tình huống.
-- Chưa deploy lên cloud. Chạy local bằng Docker Compose.
+scripts/
+├── ingest.py                     # Luồng: đọc -> validate -> quarantine -> upsert -> manifest
+├── backfill_embeddings.py        # Tính embedding cho các chunk chưa có, idempotent
+├── issue_api_keys.py             # Cấp 1 API key duy nhất cho mỗi nhân viên, in 1 lần
+├── run_eval.py                   # Đánh giá eval/dev.jsonl (pipeline docs), hỗ trợ chạy tiếp
+├── run_held_out_eval.py          # Đánh giá eval/final.jsonl qua HTTP /ask thật, chạy đúng 1 lần
+└── probe_retrieval_headroom.py   # Đo headroom để quyết định có cần hybrid retrieval hay không (ADR-011)
+
+sql/                # 00 extensions, 01 schema, 02 seed, 03-05 queries/EXPLAIN, 06 auth
+data/               # Corpus tổng hợp (16 chunk) + một tập dữ liệu bẩn cố ý để test
+eval/               # dev.jsonl (25 câu dev, mở); final.jsonl (12 câu held-out, niêm phong)
+evidence/           # Toàn bộ output thô làm căn cứ cho mọi con số trong báo cáo
+docs/               # architecture.md, decisions.md, query_plan.md, report.md, runbook.md,
+                    # demo_script.md, cv_bullets.md, reading_order.md
+tests/              # Unit tests nhanh (mock); integration test cần Postgres;
+                    # live_llm gọi Gemini thật — cả hai không chạy tự động trên CI
+```
+
+### Các lớp bảo vệ ở tầng dữ liệu
+
+| Tầng | Vai trò ngăn chặn |
+|---|---|
+| `src/contracts.py` | Trùng lặp khóa chính, thiếu trường bắt buộc, giá trị nằm ngoài danh mục cho phép, khoảng thời gian hiệu lực đảo ngược, `available_at` đi trước `published_at`. Dòng lỗi bị đẩy vào `doc_chunks_quarantine` kèm lý do rõ ràng. |
+| PostgreSQL constraints | Tái khẳng định các quy tắc trên ở tầng DB, bảo đảm script migration hoặc thao tác sửa tay khẩn cấp không thể lách qua code Python. |
+| Bảng `ingest_run` | Mỗi lần chạy tạo một dòng manifest: thống kê vi phạm từng luật, và ràng buộc `CHECK` ép tổng số dòng hợp lệ + cách ly phải bằng số dòng trong file nạp. |
+
+Kế hoạch truy vấn (Query plans) cho đường retrieval đo trên 16 dòng và ~20.000 dòng có trong [`docs/query_plan.md`](docs/query_plan.md).
+
+## Đánh giá (Evaluation)
+
+Số liệu đầy đủ, tên model, ngày chạy và hai lỗi đo lường phát hiện được trong quá trình thực hiện: [`docs/report.md`](docs/report.md). Tóm tắt:
+
+| Chỉ số | Baseline retrieval (25 câu hỏi, `gemini-3.1-flash-lite`) |
+|---|---|
+| recall@3 / @5 / @10 | 18/18 (100%) — đồ thị phẳng vì tài liệu chuẩn luôn xếp hạng 1 |
+| MRR | 1.000 |
+| Câu trả lời đúng | 18/18 |
+| Từ chối trả lời chính xác (ngoài quyền / không có kiến thức) | 5/5, 2/2 |
+| Bịa trích dẫn, vi phạm quyền, trích xuất sót | 0 |
+
+Tái hiện kết quả: `uv run python -m scripts.run_eval --report` (đọc kết quả đã lưu) hoặc `uv run python -m scripts.run_eval` (gọi API thật).
+
+`eval/final.jsonl` ban đầu được để trống có chủ ý. Tập 5 câu held-out ban đầu bị chạy sớm — trước khi có agent và RBAC/audit, nên kết quả đó không đại diện cho toàn bộ hệ thống. Chúng được gộp vào `eval/dev.jsonl` thay vì xóa đi hay âm thầm chạy lại (xem ADR-010). Sau khi agent và tầng xác thực đều đã có, một tập held-out hoàn toàn mới mới được xây dựng.
+
+Trước khi xây agent cũng đã đo đạc thực nghiệm xem hybrid retrieval có cải thiện được gì không trước khi bắt tay vào code: 5 câu diễn giải cố tình làm khó (dùng từ ngữ khác biệt nhất có thể so với câu hỏi dev) vẫn đạt 100% recall@3. Vì vậy, hybrid search không được xây dựng — xem ADR-011 và [`evidence/hybrid_headroom_probe.json`](evidence/hybrid_headroom_probe.json).
+
+### Tập held-out, chạy đúng một lần
+
+| Chỉ số | Kết quả |
+|---|---|
+| Số câu hỏi held-out | 12 câu (`eval/final.jsonl`), hoàn toàn mới — xem ADR-019 |
+| Trả lời chính xác | 9/12 |
+| Lỗi hạ tầng (502/503, app đã tự retry nhưng vẫn lỗi) | 2/12 |
+| Router chọn sai tool cho câu hỏi kết hợp SQL + Docs | 1/12 |
+| Độ trễ p50 / p95 (gọi HTTP thật, 10 request thành công) | 2.807 ms / 7.848 ms |
+| Chi phí token thật (`audit_log.total_tokens`, số đo thật đầu tiên từng được ghi) | Trung bình 618.9 tokens / request |
+
+Tái hiện kết quả: `uv run python -m scripts.run_held_out_eval --report` (bản thân lượt chạy không được lặp lại — đã được niêm phong; xem `docs/report.md`). Ba lỗi thật phát hiện trong lần chạy này đã được **chủ động giữ nguyên, không sửa ngay lập tức** — vì sửa rồi chạy lại trên cùng tập held-out sẽ làm mất đi ý nghĩa đánh giá khách quan. Sau đó một phiên làm việc riêng đã xử lý cả 3 lỗi này mà không chạm vào tập held-out niêm phong hay số liệu đã báo cáo; xem ADR-020 và mục "Follow-up" trong `docs/report.md`.
+
+## Giới hạn của hệ thống
+
+- Corpus tài liệu là **dữ liệu tổng hợp (synthetic)**, được viết riêng cho dự án này. Không dùng tài liệu thật của bất kỳ doanh nghiệp nào.
+- Vector search dùng phương pháp exact search qua pgvector, chưa đánh index ANN (HNSW/IVFFlat). Đúng đắn ở quy mô vài trăm chunk; không đại diện cho khả năng mở rộng lên hàng triệu chunk.
+- Bộ 25 câu trên corpus 16 chunk là quy mô phục vụ học tập và định vị lỗi. Kết quả không có lỗi nào ở baseline là kết quả thực tế trên bộ dữ liệu này, **không phải bằng chứng** rằng hệ thống hoàn toàn tin cậy trong mọi tình huống thực tế — xem mục "Not yet measured" trong `docs/report.md`.
+- Một câu hỏi vừa hỏi số liệu vừa hỏi chính sách trong một câu trước đây đôi khi chỉ được route tới một tool (quan sát được khi xây agent, tập held-out xác nhận lại lần nữa). Sau đó prompt router đã được gia cố và đạt 6/6 trên bài kiểm tra mới (`evidence/router_combined_tools_probe.json`) — đây là sự cải thiện trên mẫu nhỏ, không phải cam kết tuyệt đối ở quy mô lớn (xem ADR-020).
+- Phản hồi tự mâu thuẫn từ model (`abstained: true` nhưng danh sách `citations` lại có nội dung) trước đây gây lỗi 502 sau khi thử lại hết số lần — đã được sửa để tự động giáng cấp thành từ chối trả lời hợp lệ (bỏ citations, ghi nhận vào `grounding_problems`). Xem ADR-020.
+- Lỗi timeout mạng thuần túy khi gọi Gemini (`httpx.TimeoutException`/`ConnectError`) trước đây vô tình bỏ qua vòng lặp retry — đã được sửa để tự retry tương tự như mã lỗi HTTP 503 (xem ADR-020).
+- Cơ chế xác thực AuthN sử dụng API key dạng chuỗi bí mật, chưa phải JWT/OAuth2 — chưa có tính năng hết hạn tự động hay thu hồi tức thì, việc thu hồi hiện tại thực hiện bằng cách xóa thủ công `api_key_hash` trong database (xem ADR-015).
+- Jitter trong cơ chế retry được thêm vào để giải quyết hiện tượng tranh chấp gây lỗi `503` đồng thời, nhưng chưa được đo lại trong đúng kịch bản tải cao đó (xem ADR-016).
+- Chi phí token được báo cáo bằng số lượng token, chưa quy đổi ra tiền tệ do thời điểm đo chưa có bảng giá tra cứu API tự động đáng tin cậy.
+- Hệ thống chưa triển khai lên cloud; chạy cục bộ qua Docker Compose.
+
+## Tài liệu Demo và CV
+
+- [`docs/demo_script.md`](docs/demo_script.md) — Kịch bản demo 2–3 phút, xây dựng hoàn toàn từ các lệnh và kết quả có thể tái hiện ở trên.
+- [`docs/cv_bullets.md`](docs/cv_bullets.md) — Các gạch đầu dòng đưa vào CV, mỗi con số đều trỏ về một file hoặc ADR trong repo, không có con số nào được bịa ra ngoài `evidence/`.
+- [`docs/reading_order.md`](docs/reading_order.md) — Thứ tự đọc toàn bộ dự án (khoảng 170 phút).
 
 ## Giấy phép
 

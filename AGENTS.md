@@ -14,7 +14,7 @@ Hướng dẫn cho AI CLI (Claude Code, Gemini, Copilot, Cursor) khi làm việc
 
 ### Tiêu chí thành công
 
-Đây là tiêu chí **về cách làm**, không phải ngưỡng số cố định — ngưỡng chỉ có nghĩa sau khi đo baseline ở D2.
+Đây là tiêu chí **về cách làm**, không phải ngưỡng số cố định — ngưỡng chỉ có nghĩa sau khi đo baseline ở phần retrieval nền tảng.
 
 | Hạng mục | Yêu cầu |
 |---|---|
@@ -40,8 +40,8 @@ Hướng dẫn cho AI CLI (Claude Code, Gemini, Copilot, Cursor) khi làm việc
 | psycopg | >=3.2 | DB driver, raw SQL (không ORM) |
 | Pydantic | >=2.9 | Request/response contract |
 | pytest, ruff, mypy | — | Test, lint, type check |
-| MLflow | >=2.17 | Tracking mỗi eval run (extra `eval`) — **chưa dùng**, D2 chỉ ghi JSONL/JSON thô. Thêm nếu số lần chạy eval nhiều tới mức JSON thô khó so sánh |
-| prometheus-client | >=0.26 | Metrics (từ D4) |
+| MLflow | >=2.17 | Tracking mỗi eval run (extra `eval`) — **chưa dùng**, hiện chỉ ghi JSONL/JSON thô. Thêm nếu số lần chạy eval nhiều tới mức JSON thô khó so sánh |
+| prometheus-client | >=0.26 | Metrics |
 | Gemini API | v1beta | `gemini-3.1-flash-lite` sinh, `gemini-embedding-001` embed |
 
 **LLM provider đã chốt (ADR-002):** Gemini, key trong `.env` (`LLM_API_KEY`), auth bằng
@@ -55,7 +55,7 @@ trên máy này vì hết commit headroom — số đo trong ADR-002.
 ```bash
 # Môi trường (PowerShell hoặc bash trên Windows)
 uv sync --extra dev                 # Dependencies + dev tools
-uv sync --extra dev --extra eval    # MLflow + BM25 — D3 đã đo và KHÔNG dùng hybrid
+uv sync --extra dev --extra eval    # MLflow + BM25 — đã đo và KHÔNG dùng hybrid
                                      # (ADR-011); extra này để sẵn cho phân tích, chưa
                                      # gỡ vì có thể cần lại nếu corpus mở rộng
 
@@ -69,13 +69,13 @@ docker compose down -v              # Dừng và XÓA dữ liệu
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/00_extensions.sql
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/01_schema.sql
 docker compose exec -T db psql -U app -d enterprise_ai -f /sql/02_seed.sql
-docker compose exec -T db psql -U app -d enterprise_ai -f /sql/06_auth.sql   # D4: cột api_key_hash
+docker compose exec -T db psql -U app -d enterprise_ai -f /sql/06_auth.sql   # cột api_key_hash
 
 # Ingest tài liệu. Dùng -m để project root vào sys.path, không phải python scripts/...
 uv run python -m scripts.ingest                            # corpus chính, 16 chunk
 uv run python -m scripts.ingest data/documents_dirty.csv   # xem quarantine hoạt động
 
-# D4: cấp API key cho từng nhân viên đã seed — in ra ĐÚNG MỘT LẦN, tự lưu lại ngay.
+# Cấp API key cho từng nhân viên đã seed — in ra ĐÚNG MỘT LẦN, tự lưu lại ngay.
 # Idempotent theo từng nhân viên: không ghi đè key đã cấp, chỉ cấp cho ai chưa có.
 uv run python -m scripts.issue_api_keys
 
@@ -95,7 +95,7 @@ uv run ruff format src/ tests/ scripts/
 uv run mypy src/ scripts/
 ```
 
-**Port đã dùng:** API `8010`, PostgreSQL `5433`. Tránh `8000` (fraud-detection-api) và `5546` (lab SQL ngày 6) vì hai cái đó có thể đang chạy song song.
+**Port đã dùng:** API `8010`, PostgreSQL `5433`. Tránh `8000` (fraud-detection-api) và `5546` (một project SQL khác) vì hai cái đó có thể đang chạy song song.
 
 ---
 
@@ -113,7 +113,7 @@ uv run mypy src/ scripts/
 
 - **Đổi LLM provider hoặc model** — ảnh hưởng mọi số đo đã báo
 - **Sửa bộ eval** (`eval/`) sau khi đã đo baseline — làm số cũ và số mới không so sánh được
-- **Xem bộ 12 câu held-out** trước D5 — xem rồi là mất tính độc lập
+- **Xem bộ 12 câu held-out** trước khi viết báo cáo cuối — xem rồi là mất tính độc lập
 - **Đổi quy tắc RBAC** — là quyết định bảo mật, không phải refactor
 - **Thêm dependency lớn** (torch, transformers) — ảnh hưởng thời gian cài và kích thước image
 - **`docker compose down -v`** — xóa dữ liệu
@@ -121,7 +121,7 @@ uv run mypy src/ scripts/
 ### Không bao giờ được làm
 
 - **Commit `.env`** hoặc bất kỳ API key nào — kể cả API key nhân viên do
-  `scripts/issue_api_keys.py` cấp (D4); chỉ hash mới được lưu, không bao giờ log
+  `scripts/issue_api_keys.py` cấp; chỉ hash mới được lưu, không bao giờ log
   plaintext key ra console/file ngoài lần in DUY NHẤT lúc cấp
 - **Chạy lại `scripts/issue_api_keys.py` rồi ghi đè `api_key_hash` thủ công** cho một
   nhân viên đã có key — vô hiệu hoá key đang dùng của người khác mà không báo trước
@@ -177,9 +177,9 @@ Sau khi thêm timeout, chạy lại với `POSTGRES_HOST=localhost` mất **10,9
 
 `get_connection(read_only=True)` là mặc định. Đường trả lời câu hỏi không bao giờ cần ghi dữ liệu nghiệp vụ, nên một bug hoặc một câu SQL do LLM sinh ra cũng không sửa được dữ liệu. Ingestion và audit log truyền `read_only=False` một cách tường minh.
 
-### `/ask` trả 501 ở D0, trả lời thật từ D2
+### `/ask` trả 501 lúc mới dựng skeleton, trả lời thật từ khi có retrieval
 
-Stub 501 tồn tại đúng một mục đích: một câu trả lời trông như thật ở D0 sẽ làm endpoint trông như đã xong. Test `test_ask_is_honestly_unimplemented` được viết lại thành `test_api.py` hiện tại khi D2 implement thật, đúng như dòng ghi chú của nó đã yêu cầu — đây là ví dụ hiếm hoi một test tự ra lệnh cho việc sửa nó trong tương lai.
+Stub 501 tồn tại đúng một mục đích: một câu trả lời trông như thật ở giai đoạn skeleton sẽ làm endpoint trông như đã xong. Test `test_ask_is_honestly_unimplemented` được viết lại thành `test_api.py` hiện tại khi retrieval được implement thật, đúng như dòng ghi chú của nó đã yêu cầu — đây là ví dụ hiếm hoi một test tự ra lệnh cho việc sửa nó trong tương lai.
 
 ### pgvector: phải cast tường minh `::vector` trong SQL
 
@@ -187,11 +187,11 @@ Stub 501 tồn tại đúng một mục đích: một câu trả lời trông nh
 
 ### So khớp từ khóa tiếng Việt phải bỏ dấu cả hai phía
 
-Corpus và rubric trong `eval/*.jsonl` viết không dấu, nhưng Gemini luôn trả lời có dấu đầy đủ — đúng hành vi mong muốn, sai giả định nếu so chuỗi trực tiếp: `"khong duoc"` không phải chuỗi con của `"không được"`. `src/eval_taxonomy.py` có `_fold()` chuẩn hoá cả hai phía bằng NFD trước khi so, xử lý riêng `đ`/`Đ` vì đó là chữ cái Latin, không phải tổ hợp dấu. Thiếu bước này thì gần như mọi câu đúng bị chấm sai — đã xảy ra thật khi đo baseline D2.
+Corpus và rubric trong `eval/*.jsonl` viết không dấu, nhưng Gemini luôn trả lời có dấu đầy đủ — đúng hành vi mong muốn, sai giả định nếu so chuỗi trực tiếp: `"khong duoc"` không phải chuỗi con của `"không được"`. `src/eval_taxonomy.py` có `_fold()` chuẩn hoá cả hai phía bằng NFD trước khi so, xử lý riêng `đ`/`Đ` vì đó là chữ cái Latin, không phải tổ hợp dấu. Thiếu bước này thì gần như mọi câu đúng bị chấm sai — đã xảy ra thật khi đo baseline retrieval.
 
 ### `department` không phải ranh giới bảo mật cho docs retrieval
 
-Chỉ `access_level` (qua `visible_access_levels`) và thời điểm lọc docs — `department` là phân loại nội dung, không phải quyền. Một nhân viên Sales được phép đọc chính sách nghỉ phép của HR. Ranh giới department thật sự (nếu cần) thuộc về tool SQL ở D3, xem ADR-009.
+Chỉ `access_level` (qua `visible_access_levels`) và thời điểm lọc docs — `department` là phân loại nội dung, không phải quyền. Một nhân viên Sales được phép đọc chính sách nghỉ phép của HR. Ranh giới department thật sự (nếu cần) thuộc về tool SQL, xem ADR-009.
 
 ### TRUNCATE ... CASCADE xóa nhiều hơn bảng được nêu tên
 
@@ -216,11 +216,11 @@ phải thử lại điều này.
 
 ### Eval trước tối ưu
 
-D2 phải có bộ eval và số baseline **trước** khi D3 đổi retrieval. Đây là nguyên tắc cứng, không phải thứ tự cho tiện.
+Phải có bộ eval và số baseline **trước** khi đổi retrieval. Đây là nguyên tắc cứng, không phải thứ tự cho tiện.
 
 ### Kiểm process cũ đang chiếm port trước khi tin một kết quả debug lạ
 
-Khi debug D3, `/ask` trả lời sai (route ra "docs" cho một câu hỏi doanh thu rõ ràng)
+Khi debug agent routing, `/ask` trả lời sai (route ra "docs" cho một câu hỏi doanh thu rõ ràng)
 dù gọi thẳng `run_agent()` bằng script lại đúng. Nguyên nhân: một tiến trình
 `uvicorn --port 8010` cũ từ phiên làm việc trước đó **vẫn đang chạy**, phục vụ code cũ
 (trước khi có `src/agent/`), và request cứ thế trúng vào nó. Log của lần start MỚI
@@ -235,56 +235,55 @@ start lại, không chạy song song nhiều bản.
 
 ---
 
-## 7. Session Plan (D0 → D5)
+## 7. Kế hoạch xây dựng
 
-Mỗi ngày là một session độc lập. Bắt đầu chat mới được, không mất context nhờ `AGENTS.md` + `docs/architecture.md` + `docs/decisions.md` + git history.
+Mỗi giai đoạn là một session độc lập. Bắt đầu chat mới được, không mất context nhờ `AGENTS.md` + `docs/architecture.md` + `docs/decisions.md` + git history.
 
-Lịch học tương ứng nằm ở `CHIEN_LUOC_HOC_VA_LAM_PROJECT_RIKKEI.md` trong vault tài liệu (`D:\Documents\AI\Update`), không nằm trong repo này.
-
-| Session | Trạng thái | Roadmap | Deliverables |
-|---|---|---|---|
-| **D0** | DONE | Ngày 5 (pandas) | Skeleton: `compose.yaml`, `Dockerfile`, `src/{api,config,db,schemas}.py`, 7 tests, CI, `docs/{architecture,decisions}.md` |
-| **D1** | DONE | Ngày 6 + 7 | `sql/01_schema.sql` (7 bảng), `sql/02_seed.sql`, `sql/03_business_metrics.sql`, `sql/04_docs_point_in_time.sql`, `sql/05_explain.sql`, `src/contracts.py`, `scripts/ingest.py`, `data/documents.csv` (16 chunk) + `documents_dirty.csv`, 32 tests, `docs/query_plan.md` |
-| **D2** | DONE | Ngày 19 + 20 | `src/embeddings.py`, `src/retrieval.py` (dense, pgvector), `src/generation.py` (structured output, 2 cổng kiểm), `src/eval_taxonomy.py` (8 nhãn), `scripts/{backfill_embeddings,run_eval}.py`, `eval/dev.jsonl` (25 câu), `docs/report.md`, 50 unit + 11 integration tests |
-| **D3** | DONE | Ngày 21 + 22 | Đo trước: 5 câu paraphrase mạnh, recall@3=5/5 — không có gì để hybrid cải thiện, ADR-011 ghi lý do không xây. `src/agent/{router,tools,schema,loop}.py` (2 tool: SQL + docs, RBAC trước thực thi, retry/timeout, KHÔNG phải ReAct nhiều bước — ADR-013), RBAC SQL theo phòng ban (ADR-012), test prompt injection thật (Gemini thật bị "thuyết phuc" đề xuất sai phòng ban, RBAC vẫn chặn) |
-| **D4** | DONE | Ngày 25 + 26 | Đóng lỗ hổng AuthN thật đã đo bằng curl (ADR-015): `src/auth.py` + `sql/06_auth.sql` + `scripts/issue_api_keys.py` — RBAC/agent giờ dùng role/department từ danh tính đã xác thực, không dùng trường request. `tests/test_rbac_isolation.py` (ma trận 61 ca), `src/audit.py` (ghi `audit_log`, ADR-017), `src/metrics.py` + `/metrics` (Prometheus, ADR-017), `docs/runbook.md`. Vá thêm 3 khoảng trống đo được ở ngày 25 (ADR-016): connection pool (`psycopg_pool`), `statement_timeout`, jitter cho retry |
-| **D5** | DONE | Ngày 29 | `docs/report.md` (chạy 12 câu held-out **một lần**), README hoàn chỉnh, `docs/demo_script.md`, `docs/cv_bullets.md`, `docs/reading_order.md` (D0→D5), ADR-018/019 |
+| Giai đoạn | Trạng thái | Deliverables |
+|---|---|---|
+| **Skeleton** | DONE | `compose.yaml`, `Dockerfile`, `src/{api,config,db,schemas}.py`, 7 tests, CI, `docs/{architecture,decisions}.md` |
+| **Tầng dữ liệu** | DONE | `sql/01_schema.sql` (7 bảng), `sql/02_seed.sql`, `sql/03_business_metrics.sql`, `sql/04_docs_point_in_time.sql`, `sql/05_explain.sql`, `src/contracts.py`, `scripts/ingest.py`, `data/documents.csv` (16 chunk) + `documents_dirty.csv`, 32 tests, `docs/query_plan.md` |
+| **Retrieval nền tảng** | DONE | `src/embeddings.py`, `src/retrieval.py` (dense, pgvector), `src/generation.py` (structured output, 2 cổng kiểm), `src/eval_taxonomy.py` (8 nhãn), `scripts/{backfill_embeddings,run_eval}.py`, `eval/dev.jsonl` (25 câu), `docs/report.md`, 50 unit + 11 integration tests |
+| **Agent routing** | DONE | Đo trước: 5 câu paraphrase mạnh, recall@3=5/5 — không có gì để hybrid cải thiện, ADR-011 ghi lý do không xây. `src/agent/{router,tools,schema,loop}.py` (2 tool: SQL + docs, RBAC trước thực thi, retry/timeout, KHÔNG phải ReAct nhiều bước — ADR-013), RBAC SQL theo phòng ban (ADR-012), test prompt injection thật (Gemini thật bị "thuyết phuc" đề xuất sai phòng ban, RBAC vẫn chặn) |
+| **Xác thực & độ tin cậy** | DONE | Đóng lỗ hổng AuthN thật đã đo bằng curl (ADR-015): `src/auth.py` + `sql/06_auth.sql` + `scripts/issue_api_keys.py` — RBAC/agent giờ dùng role/department từ danh tính đã xác thực, không dùng trường request. `tests/test_rbac_isolation.py` (ma trận 61 ca), `src/audit.py` (ghi `audit_log`, ADR-017), `src/metrics.py` + `/metrics` (Prometheus, ADR-017), `docs/runbook.md`. Vá thêm 3 khoảng trống đo được: connection pool (`psycopg_pool`), `statement_timeout`, jitter cho retry (ADR-016) |
+| **Báo cáo cuối** | DONE | `docs/report.md` (chạy 12 câu held-out **một lần**), README hoàn chỉnh, `docs/demo_script.md`, `docs/cv_bullets.md`, `docs/reading_order.md`, ADR-018/019 |
 
 ### Bootstrap Prompt cho session mới
 
-**D1:**
+**Tầng dữ liệu:**
 
 ```text
 Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md,
 docs/architecture.md và docs/decisions.md để nắm context.
-D1 (roadmap Ngày 6+7): thiết kế schema PostgreSQL cho business data + document
+Tầng dữ liệu: thiết kế schema PostgreSQL cho business data + document
 chunks + audit log, viết ingestion có contract validation, chạy EXPLAIN ANALYZE
 trước/sau index.
 Kiểm codebase hiện tại rồi bắt đầu.
 ```
 
-**D2 (hoàn thành 14/09/2026):**
+**Retrieval nền tảng (hoàn thành 14/09/2026):**
 
 ```text
 Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md và
 docs/decisions.md.
-D2 (roadmap Ngày 19+20): dense retrieval + structured output cho /ask, rồi viết
+Retrieval nền tảng: dense retrieval + structured output cho /ask, rồi viết
 bộ eval 40 câu có ground truth (28 dev / 12 held-out) và ĐO BASELINE trước khi
 tối ưu bất cứ gì. Provider đã chốt ở ADR-002: Gemini, key có sẵn trong .env.
 Kiểm codebase hiện tại rồi bắt đầu.
 ```
 
 Kết quả thật khác kế hoạch ở một chỗ đáng ghi: chỉ 25 câu (không phải 40), và
-`eval/final.jsonl` **để trống** — 5 câu held-out ban đầu bị chạy sớm ở D2 (lỗi quy
-trình, xem ADR-010), đã gộp vào dev với hậu tố `_seen_at_d2`. D5 cần viết một tập
-held-out mới, sau khi D3+D4 xong.
+`eval/final.jsonl` **để trống** — 5 câu held-out ban đầu bị chạy sớm (lỗi quy
+trình, xem ADR-010), đã gộp vào dev với hậu tố `_seen_at_d2` (giữ nguyên tên gốc
+trong data, không đổi tên lịch sử). Báo cáo cuối cần viết một tập held-out mới,
+sau khi agent routing và xác thực đều xong.
 
-**D3 (hoàn thành 14/09/2026):**
+**Agent routing (hoàn thành 14/09/2026):**
 
 ```text
 Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md,
 docs/decisions.md (ADR-010) và docs/report.md.
-D3 (roadmap Ngày 21+22): baseline D2 đã recall@3=100% trên 25 câu dev (corpus 16
+Agent routing: baseline retrieval đã recall@3=100% trên 25 câu dev (corpus 16
 chunk) — TRƯỚC KHI code hybrid, viết thêm câu hỏi khó hơn hoặc corpus lớn hơn để
 biết dense retrieval còn giới hạn ở đâu; nếu không có gì để cải thiện thì ghi rõ
 lý do không làm hybrid, đừng làm vì kế hoạch cũ nói vậy. Xây agent 2 tool (SQL +
@@ -295,52 +294,52 @@ Kiểm codebase hiện tại rồi bắt đầu.
 Kết quả thật, đáng ghi: đo 5 câu paraphrase mạnh trước, recall@3=5/5 — quyết định
 **không xây hybrid** (ADR-011), không phải vì hết thời gian mà vì không đo được lợi
 ích nào. Agent là một pipeline có giới hạn (router → RBAC → thực thi → tổng hợp,
-ADR-013), không phải vòng lặp ReAct nhiều bước như bài học ngày 22 — vì kiến trúc chỉ
+ADR-013), không phải vòng lặp ReAct nhiều bước — vì kiến trúc chỉ
 cần đúng một quyết định phân loại, không cần agent tự đề xuất từng bước. RBAC cho SQL
 giới hạn theo phòng ban, trừ executive (ADR-012); test prompt injection dùng Gemini
 thật (không mock) để xác nhận RBAC chặn được ngay cả khi router bị "thuyết phục" đề
 xuất sai phòng ban.
 
-**D4 (hoàn thành 15/09/2026):**
+**Xác thực & độ tin cậy (hoàn thành 15/09/2026):**
 
 ```text
 Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md và
 docs/architecture.md.
-D4 (roadmap Ngày 25+26): RBAC áp ở tầng truy vấn dữ liệu (không qua prompt), test
+Xác thực & độ tin cậy: RBAC áp ở tầng truy vấn dữ liệu (không qua prompt), test
 cách ly theo role, audit log, Prometheus metrics, async timeout, runbook.
 Lưu ý: cache key phải chứa access scope, nếu không sẽ rò dữ liệu giữa các user.
 Kiểm codebase hiện tại rồi bắt đầu.
 ```
 
-Kết quả thật, đáng ghi: RBAC ở tầng truy vấn dữ liệu đã đúng từ D2/D3 — phát hiện
-thật của D4 là **phía TRƯỚC RBAC** hoàn toàn trống: `role`/`department` chỉ là
+Kết quả thật, đáng ghi: RBAC ở tầng truy vấn dữ liệu đã đúng từ trước — phát hiện
+thật của giai đoạn này là **phía TRƯỚC RBAC** hoàn toàn trống: `role`/`department` chỉ là
 trường request tự khai, không có gì xác thực (đo bằng `curl` thật, ADR-015). Vá
 bằng API key thật (`src/auth.py`), không dừng ở việc thêm test — RBAC/agent đổi
 sang dùng danh tính đã xác thực làm nguồn sự thật. Audit log và Prometheus đều là
-dependency/bảng đã tồn tại từ D0/D1, chưa từng dùng tới giờ mới thật sự ghi/expose.
+dependency/bảng đã tồn tại từ trước, chưa từng dùng tới giờ mới thật sự ghi/expose.
 Ghi chú "cache key phải chứa access scope" trong bootstrap prompt trên vẫn đúng
-nhưng chưa áp dụng — dự án chưa có cache nào (xem vault ngày 25), nguyên tắc để
+nhưng chưa áp dụng — dự án chưa có cache nào, nguyên tắc để
 sẵn cho lần đầu tiên thêm cache.
 
-**D5 (hoàn thành 15/09/2026):**
+**Báo cáo cuối (hoàn thành 15/09/2026):**
 
 ```text
 Tôi tiếp tục project Enterprise AI Decision Platform. Đọc AGENTS.md và toàn bộ
 evidence/.
-D5 (roadmap Ngày 29): chạy bộ 12 câu held-out MỘT LẦN, viết docs/report.md
+Báo cáo cuối: chạy bộ 12 câu held-out MỘT LẦN, viết docs/report.md
 (ablation, latency p50/p95, token cost kèm điều kiện đo), hoàn chỉnh README + sơ
 đồ, script video demo 2-3 phút, bullet CV có số thật.
 Kiểm codebase hiện tại rồi bắt đầu.
 ```
 
-Kết quả thật, đáng ghi: `audit_log.total_tokens` tồn tại từ D1 nhưng chưa từng được
+Kết quả thật, đáng ghi: `audit_log.total_tokens` tồn tại từ lâu nhưng chưa từng được
 ghi — trước khi đo được "token cost kèm điều kiện đo" như bootstrap yêu cầu, phải vá
 lỗ hổng đó trước (ADR-018), đổi kiểu trả về của `route()` để tránh một bug tương tranh
 tương tự lớp lỗi ADR-016 đã gặp. Viết mới 12 câu held-out (`eval/final.jsonl`, chưa
-từng chấm điểm) nhắm đúng vào hai khoảng trống D3/D4 đã tự ghi nhận "chưa đo được":
-SQL-only và câu hỏi kết hợp cả hai tool. Chạy MỘT LẦN qua `/ask` thật (không gọi
-`run_agent()` trong tiến trình) — 9/12 đúng, phát hiện 3 lỗi thật (router bỏ sót
-tool ở câu kết hợp, một response tự mâu thuẫn khiến 502, một timeout mạng không được
+từng chấm điểm) nhắm đúng vào hai khoảng trống các báo cáo trước đã tự ghi nhận
+"chưa đo được": SQL-only và câu hỏi kết hợp cả hai tool. Chạy MỘT LẦN qua `/ask` thật
+(không gọi `run_agent()` trong tiến trình) — 9/12 đúng, phát hiện 3 lỗi thật (router bỏ
+sót tool ở câu kết hợp, một response tự mâu thuẫn khiến 502, một timeout mạng không được
 retry dù lỗi HTTP status thì có). Cả ba **để nguyên không vá** — đúng luật ở mục 4
 ("xem điểm trên held-out rồi tiếp tục tinh chỉnh và báo lại trên chính tập đó" là bị
 cấm), ghi lại làm backlog cho phiên sau thay vì âm thầm sửa rồi báo một con số đẹp

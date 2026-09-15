@@ -6,7 +6,7 @@ Các bản ghi ngắn gọn ghi lại các lựa chọn kỹ thuật **không hi
 
 ## ADR-001 — Dùng một instance PostgreSQL duy nhất cho dữ liệu nghiệp vụ, vector và audit log
 
-**Ngày:** D0 • **Trạng thái:** Chấp thuận (Accepted)
+**Ngày:** giai đoạn skeleton • **Trạng thái:** Chấp thuận (Accepted)
 
 **Bối cảnh (Context).** Hệ thống cần các bảng nghiệp vụ quan hệ (cho công cụ SQL Tool), các đoạn văn bản tài liệu kèm vector embedding (cho công cụ Retrieval Tool / RAG), và một bảng nhật ký kiểm toán (Audit Trail). Phương án thay thế phổ biến ngoài thị trường là dựng thêm một Vector Database chuyên dụng (như Qdrant, Weaviate, Pinecone) chạy song song cạnh PostgreSQL.
 
@@ -22,9 +22,9 @@ Các bản ghi ngắn gọn ghi lại các lựa chọn kỹ thuật **không hi
 
 ## ADR-002 — Chốt Gemini cho cả Generation và Embedding
 
-**Ngày:** Mở ở D0, chốt ngày 13/09/2026 • **Trạng thái:** Chấp thuận (Accepted), chốt bằng số đo thực tế
+**Ngày:** Mở ở giai đoạn skeleton, chốt ngày 13/09/2026 • **Trạng thái:** Chấp thuận (Accepted), chốt bằng số đo thực tế
 
-**Bối cảnh ban đầu (D0).** Không chọn nhà cung cấp vội, vì chốt vendor trước khi có bộ đánh giá sẽ biến phép đo đầu tiên thành cuộc so sánh vendor thay vì đo lường năng lực của hệ thống.
+**Bối cảnh ban đầu (giai đoạn skeleton).** Không chọn nhà cung cấp vội, vì chốt vendor trước khi có bộ đánh giá sẽ biến phép đo đầu tiên thành cuộc so sánh vendor thay vì đo lường năng lực của hệ thống.
 
 ### Điều đã đo thực tế, và nó loại bỏ phương án Local Model:
 Máy phát triển: Laptop GPU RTX 4060 8 GB VRAM, 15.2 GB RAM, CPU Ryzen 7 7840H.
@@ -44,7 +44,7 @@ Chỉ còn **2.6 GB commit headroom**, trong khi model cần một khối liên 
 | Thành phần | Lựa chọn | Ghi chú |
 |---|---|---|
 | **Generation (Sinh văn bản)** | **`gemini-3.1-flash-lite`** | Ghim cứng phiên bản cụ thể, **không** dùng alias `-latest` |
-| **Model so sánh A/B** | `gemini-3.5-flash` | Dùng để đối chiếu ở D2 |
+| **Model so sánh A/B** | `gemini-3.5-flash` | Dùng để đối chiếu ở giai đoạn retrieval nền tảng |
 | **Embedding** | **`gemini-embedding-001`** | `outputDimensionality=384` (giữ nguyên cột `vector(384)`) |
 | **Xác thực (Auth)** | API Key đặt trong Header `x-goog-api-key` | **Không** để key lộ trên URL Query String |
 | **API Version** | `v1beta` | Bản `v1` không hỗ trợ các model mới này |
@@ -59,7 +59,9 @@ Chỉ còn **2.6 GB commit headroom**, trong khi model cần một khối liên 
 
 ### Bẫy kỹ thuật bắt buộc phải nhớ: Thinking Token bị trừ vào Max Output!
 Gemini 3.x bật chế độ suy nghĩ (Thinking) mặc định, và **`thoughtsTokenCount` được tính thẳng vào `maxOutputTokens`**. Đã đo được với `maxOutputTokens = 80`:
-- Model dùng hết 75 token để suy nghĩ, chỉ còn 1 token để xuất $ightarrow$ Bị ngắt với `finishReason = MAX_TOKENS` $ightarrow$ Nội dung trả về bị **RỖNG** dù mã HTTP vẫn là 200!
+- Model dùng hết 75 token để suy nghĩ, chỉ còn 1 token để xuất $
+ightarrow$ Bị ngắt với `finishReason = MAX_TOKENS` $
+ightarrow$ Nội dung trả về bị **RỖNG** dù mã HTTP vẫn là 200!
 - Ở tầng trên nó sẽ hiện ra thành lỗi Parse JSON rất khó hiểu.
 👉 **Giải pháp:** Đặt `llm_max_output_tokens = 1200` và luôn kiểm tra `finishReason` trước khi parse.
 
@@ -67,7 +69,7 @@ Gemini 3.x bật chế độ suy nghĩ (Thinking) mặc định, và **`thoughts
 
 ## ADR-003 — Bộ Eval và các file Evidence được commit lên Git; Dữ liệu thô và mô hình thì không
 
-**Ngày:** D0 • **Trạng thái:** Chấp thuận (Accepted)
+**Ngày:** giai đoạn skeleton • **Trạng thái:** Chấp thuận (Accepted)
 
 **Bối cảnh.** File `.gitignore` thông thường sẽ loại trừ toàn bộ thư mục dữ liệu. Nhưng các câu hỏi đánh giá ở đây là Ground Truth được viết cẩn thận bằng tay, và mọi con số tuyên bố trong README đều phải truy nguyên được từ một lần chạy cụ thể.
 
@@ -79,7 +81,7 @@ Gemini 3.x bật chế độ suy nghĩ (Thinking) mặc định, và **`thoughts
 
 ## ADR-004 — Tách riêng hai Endpoint Liveness (`/health`) và Readiness (`/ready`)
 
-**Ngày:** D0 • **Trạng thái:** Chấp thuận (Accepted)
+**Ngày:** giai đoạn skeleton • **Trạng thái:** Chấp thuận (Accepted)
 
 **Bối cảnh.** Nếu một Container Healthcheck gọi tới Database, khi Database bị khởi động lại hoặc nghẽn mạng ngắn hạn, container ứng dụng sẽ bị đánh giá là lỗi và Docker/Kubernetes sẽ restart một tiến trình vốn đang hoạt động hoàn toàn bình thường.
 
@@ -93,7 +95,7 @@ Gemini 3.x bật chế độ suy nghĩ (Thinking) mặc định, và **`thoughts
 
 ## ADR-005 — Database Host mặc định là `127.0.0.1`, tuyệt đối không dùng `localhost`
 
-**Ngày:** D0 • **Trạng thái:** Chấp thuận (Accepted), nguyên nhân xác định bằng số đo thực tế
+**Ngày:** giai đoạn skeleton • **Trạng thái:** Chấp thuận (Accepted), nguyên nhân xác định bằng số đo thực tế
 
 **Bối cảnh.** Bài kiểm tra tích hợp chạy mãi không xong thay vì báo lỗi nhanh. Tái hiện lại có chủ đích: Với `POSTGRES_HOST=localhost`, bài test không hoàn thành trong 240 giây; với `127.0.0.1`, test pass trong **0.44 giây**.
 
@@ -120,7 +122,7 @@ Gemini 3.x bật chế độ suy nghĩ (Thinking) mặc định, và **`thoughts
 
 ## ADR-006 — Contract dữ liệu là một module dùng chung, Severity phân theo hậu quả
 
-**Ngày:** D1 • **Trạng thái:** Chấp thuận (Accepted)
+**Ngày:** giai đoạn tầng dữ liệu • **Trạng thái:** Chấp thuận (Accepted)
 
 **Bối cảnh.** Dữ liệu tài liệu vào hệ thống qua Ingestion và sẽ được đọc lại ở luồng Serving. Cách dễ nhất là kiểm tra rải rác ở mỗi nơi tiêu thụ.
 
@@ -134,7 +136,7 @@ Gemini 3.x bật chế độ suy nghĩ (Thinking) mặc định, và **`thoughts
 
 ## ADR-007 — Seed Idempotent, không dùng `TRUNCATE CASCADE`
 
-**Ngày:** D1 • **Trạng thái:** Chấp thuận (Accepted), phát hiện khi chạy thật
+**Ngày:** giai đoạn tầng dữ liệu • **Trạng thái:** Chấp thuận (Accepted), phát hiện khi chạy thật
 
 **Bối cảnh.** Bản đầu tiên của `sql/02_seed.sql` mở đầu bằng:
 `TRUNCATE monthly_revenue, employees, departments CASCADE;` cho "sạch".
@@ -151,7 +153,7 @@ Gemini 3.x bật chế độ suy nghĩ (Thinking) mặc định, và **`thoughts
 
 ## ADR-008 — Giữ Index `ix_chunks_scope` dù ở quy mô hiện tại chưa đo được lợi ích
 
-**Ngày:** D1 • **Trạng thái:** Chấp thuận (Accepted), có số đo thực tế
+**Ngày:** giai đoạn tầng dữ liệu • **Trạng thái:** Chấp thuận (Accepted), có số đo thực tế
 
 **Bối cảnh.** Kho tài liệu hiện có 16 chunks. Một index ở quy mô đó là chuẩn bị cho tương lai, không phải tối ưu tức thì.
 

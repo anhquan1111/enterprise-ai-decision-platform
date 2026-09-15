@@ -9,8 +9,8 @@ chứng, chẩn đoán nhanh, hành động, xác nhận đã xong, khi nào leo
 
 ## 1. Kết quả `/ask` qua HTTP khác kết quả gọi hàm Python trực tiếp
 
-Sự cố **thật** đã xảy ra khi debug D3 — xem `AGENTS.md` mục "Non-obvious Patterns &
-Gotchas" và postmortem đầy đủ trong vault (`Reliability_&_Access_Control/4. Lab.md`).
+Sự cố **thật** đã xảy ra khi debug agent routing — xem `AGENTS.md` mục "Non-obvious
+Patterns & Gotchas" cho chi tiết.
 
 ### Triệu chứng
 - Gọi `run_agent()`/`retrieve()` trực tiếp bằng script cho kết quả ĐÚNG.
@@ -68,7 +68,7 @@ trong `.env` có khớp `sql/02_seed.sql` không.
 
 ---
 
-## 3. `/ask` trả `401`/`403` hàng loạt (nghi ngờ sự cố xác thực, D4)
+## 3. `/ask` trả `401`/`403` hàng loạt (nghi ngờ sự cố xác thực)
 
 ### Triệu chứng
 Nhiều client báo `/ask` trả `401 khong xac thuc duoc` hoặc `403` dù trước đó vẫn
@@ -113,14 +113,15 @@ Nhiều request cùng lúc, một phần trả `503`, log có `429 Too Many Requ
 `503 Service Unavailable` từ `generativelanguage.googleapis.com`.
 
 ### Chẩn đoán nhanh
-Đây là sự cố **đã đo thật** ở vault ngày 25 — không phải giả định. Đọc log tìm dòng
-`INFO:httpx:HTTP Request: POST .../generateContent "HTTP/1.1 429...` hoặc `503...`.
+Đây là sự cố **đã đo thật** ở một phiên đo tải trước đó — không phải giả định. Đọc log
+tìm dòng `INFO:httpx:HTTP Request: POST .../generateContent "HTTP/1.1 429...` hoặc
+`503...`.
 
 ### Hành động
 - Đây là giới hạn của Gemini free-tier, không phải bug trong code — retry đã có
-  (`_NETWORK_RETRY_ATTEMPTS=3`, có jitter từ D4) sẽ tự phục hồi phần lớn trường hợp.
+  (`_NETWORK_RETRY_ATTEMPTS=3`, có jitter) sẽ tự phục hồi phần lớn trường hợp.
 - Nếu tần suất `503` cao và kéo dài: cân nhắc nâng hạn mức API (trả phí) hoặc giảm
-  tải đồng thời phía client (xem vault ngày 25, mục "Phương án mở rộng").
+  tải đồng thời phía client.
 
 ### Xác nhận đã xong
 Tỷ lệ `503` giảm về gần 0 sau khi tải giảm hoặc hạn mức được nâng.

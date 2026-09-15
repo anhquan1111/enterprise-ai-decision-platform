@@ -1,10 +1,10 @@
 # Evaluation report
 
 Numbers here are appended per layer, not rewritten. Each block names the model, the
-date, and the exact command to reproduce it. This file grows through D2 → D5; it is
-not a final report until D5 says so.
+date, and the exact command to reproduce it. This file grows as each layer lands; it
+is not a final report until the held-out section says so.
 
-## D2 — dense retrieval + structured output, baseline on dev
+## Retrieval baseline — dense retrieval + structured output, baseline on dev
 
 **Measured:** 13–14/09/2026. **Models:** `gemini-3.1-flash-lite` (generation),
 `gemini-embedding-001` at 384 dimensions (embeddings), both pinned in `.env`.
@@ -47,8 +47,8 @@ question. **This is a small, synthetic corpus with clearly worded questions — 
 not evidence that dense retrieval always ranks first.** See "Not yet measured" below.
 
 One retrieval comparison worth keeping: the equivalent question to *"what to do when
-a release fails"* was used in the RAG_Evaluation teaching material (day 20) on a
-different, smaller synthetic corpus, scored with a hand-written TF-IDF baseline. There
+a release fails"* was tried earlier on a different, smaller synthetic corpus, scored
+with a hand-written TF-IDF baseline. There
 it ranked **5th** — the question describes the situation ("failure"), the answer chunk
 describes the fix ("rollback"), and they share almost no vocabulary. The same kind of
 question against this project's real corpus, using real Gemini embeddings, ranked
@@ -57,7 +57,7 @@ expected to fix over lexical search, measured rather than assumed.
 
 ### Answer quality and error taxonomy
 
-Eight categories, ported from RAG_Evaluation (day 20) into `src/eval_taxonomy.py`.
+Eight categories, in `src/eval_taxonomy.py`.
 
 | Category | Count |
 |---|---:|
@@ -89,42 +89,45 @@ fix, nearly every correct answer in this dataset would have been scored wrong.
 
 ### A process mistake, corrected in the record rather than hidden
 
-`docs/architecture.md` states plainly: "Final report on held-out questions" is D5's
-job, after hybrid retrieval (D3) and RBAC/audit (D4) exist. The system today is not
-that system. `eval/final.jsonl` (5 questions) was scored anyway on 14/09 — a genuine
-process slip, not a deliberate design choice.
+`docs/architecture.md` states plainly: "Final report on held-out questions" is the
+job of the final report layer, after hybrid retrieval and RBAC/audit exist. The
+system today is not that system. `eval/final.jsonl` (5 questions) was scored anyway
+on 14/09 — a genuine process slip, not a deliberate design choice.
 
-Per the rule already recorded for this exact situation (day 19, section 4): a seen
-held-out set is not deleted and not pretended unseen. It becomes dev data. The 5
-questions were renamed `F0x_seen_at_d2` and folded into `eval/dev.jsonl`, which is why
-the dev count above is 25 rather than 20. `eval/final.jsonl` is empty; D5 writes a
-genuinely new held-out set once the system it is meant to evaluate actually exists.
+Per the rule already recorded for this exact situation: a seen held-out set is not
+deleted and not pretended unseen. It becomes dev data. The 5 questions were renamed
+`F0x_seen_at_d2` (that suffix is a literal `question_id` in `eval/dev.jsonl` — a
+historical record of when it happened, not touched retroactively) and folded into
+`eval/dev.jsonl`, which is why the dev count above is 25 rather than 20.
+`eval/final.jsonl` is empty; the final report layer writes a genuinely new held-out
+set once the system it is meant to evaluate actually exists.
 
 ### Not yet measured
 
-- **Whether hybrid retrieval (the original D3 plan) has anything to improve.** Recall
-  is already 100% at k=3 on this dev set. D3 should measure on harder or more numerous
+- **Whether hybrid retrieval (the original plan) has anything to improve.** Recall
+  is already 100% at k=3 on this dev set. Measure on harder or more numerous
   questions before assuming hybrid search is worth its added complexity — building it
   because it was planned, on a baseline that is already perfect, would not be a
   measured decision.
 - **Cost and latency under load.** Every call so far has been sequential, one question
   at a time, with a fixed 1-second pause between them to stay polite to the free-tier
   rate limit. No number here describes concurrent behaviour.
-- **The SQL business-data tool and agent routing.** Both are D3. `/ask` today only
+- **The SQL business-data tool and agent routing.** `/ask` today only
   answers document questions; a revenue question is treated as "no evidence" and
   correctly abstains, which is accurate but not yet useful.
 - **Audit logging and RBAC on the `/ask` response path.** The `audit_log` table exists
-  (D1) but nothing writes to it yet — that is D4.
+  but nothing writes to it yet.
 
-## D3 — agent routing (SQL + docs), RBAC for SQL, hybrid retrieval decision
+## Agent routing — SQL + docs tools, RBAC for SQL, hybrid retrieval decision
 
 **Measured:** 14/09/2026. **Model:** `gemini-3.1-flash-lite` for both the router
-(`src/agent/router.py`) and docs generation, same pin as D2.
+(`src/agent/router.py`) and docs generation, same pin as the retrieval baseline.
 
 ### Hybrid retrieval: measured, not built
 
-`docs/report.md` (D2, above) asked D3 to check whether harder questions expose a gap
-before assuming hybrid search is worth the added complexity. `scripts/probe_retrieval_headroom.py`
+The retrieval baseline section above asked this phase to check whether harder
+questions expose a gap before assuming hybrid search is worth the added complexity.
+`scripts/probe_retrieval_headroom.py`
 ran 5 new questions against `retrieve()`, each a strong paraphrase of an existing dev
 question for the same gold chunk, chosen to share as little vocabulary as possible
 (e.g. gold `ENG-007#1` — the release-rollback chunk — re-asked as *"Khi mot phien ban
@@ -137,7 +140,7 @@ phan mem gap su co ngay sau khi phat hanh, quy trinh khac phuc la gi?"*, sharing
 
 Raw results: [`evidence/hybrid_headroom_probe.json`](../evidence/hybrid_headroom_probe.json).
 Decision and reasoning: ADR-011. `eval/dev.jsonl` was **not** modified for this check —
-the probe is a separate, one-off script, so the 25-question baseline reported at D2
+the probe is a separate, one-off script, so the 25-question baseline reported above
 stays comparable.
 
 ### Agent: router + 2 tools, RBAC before execution
@@ -150,7 +153,7 @@ control (ADR-012). SQL numbers are returned verbatim, never rephrased by an LLM.
 
 | Behaviour | Result | Evidence |
 |---|---|---|
-| Router picks `docs` for a policy question | Correct, matches D2 pipeline exactly | `tests/test_ask_live.py::test_agent_routes_docs_question_to_docs_tool` (real Gemini) |
+| Router picks `docs` for a policy question | Correct, matches the retrieval-baseline pipeline exactly | `tests/test_ask_live.py::test_agent_routes_docs_question_to_docs_tool` (real Gemini) |
 | Router picks `sql` for a revenue question, correct number returned | Correct — `"2026-01: 4,200,000,000 VND"` matches seed data exactly | Manual `/ask` run, 14/09/2026 |
 | Employee tries to read another department's revenue via a crafted question | **Blocked** — `abstained=true`, `tool_used=none`, SQL query never executed | `tests/test_ask_live.py::test_agent_blocks_cross_department_revenue_even_if_router_complies` (real Gemini, real DB) — router proposed `department="finance"` exactly as asked; `can_query_department` rejected it anyway |
 | Malformed router JSON | Retried once with the exact parse error, then succeeds; abstains (not a crash) if still malformed after retry | `tests/test_agent_router.py` |
@@ -166,21 +169,21 @@ tests above run against the real router and real database).
 - **Combined sql+docs questions, systematically.** One manual test asked for both a
   revenue number and a discount policy in one sentence; the router chose only `sql`.
   This is a real, observed limitation — not yet covered by a dedicated eval set, so no
-  rate is reported. Worth a small eval set before D5's held-out report.
+  rate is reported. Worth a small eval set before the final held-out report.
 - **SQL query timeout.** `sql_tool` inherits the 5s *connection* timeout (ADR-005) but
   has no `statement_timeout` on the query itself. Not a realistic risk on this dataset
   size, but a real gap.
 - **Cost/latency under concurrent load.** All calls so far are sequential, one request
   at a time.
 
-## D4 — AuthN, audit log, Prometheus, connection pool, timeouts
+## Auth & reliability — AuthN, audit log, Prometheus, connection pool, timeouts
 
 **Measured:** 15/09/2026.
 
 ### A real vulnerability, found and closed
 
-D3 shipped correct RBAC (`can_query_department`, `visible_access_levels`) but no
-authentication — `AskRequest.role`/`department` were trusted as submitted. Measured
+Agent routing shipped correct RBAC (`can_query_department`, `visible_access_levels`)
+but no authentication — `AskRequest.role`/`department` were trusted as submitted. Measured
 with a real `curl` request, no `Authorization` header, `user_id` set to an obviously
 fake identity, `role` self-declared as `executive`:
 
@@ -222,7 +225,7 @@ above their access level. 61/61 pass.
 
 ### Audit log and Prometheus — both real, not stubs
 
-`audit_log` (table since D1, never written to) now receives one row per successful
+`audit_log` (a table that existed unused for a while) now receives one row per successful
 `/ask` call — confirmed by a real request through a live server, then reading the
 row back:
 
@@ -232,7 +235,7 @@ row back:
  'llm_model': 'gemini-3.1-flash-lite', 'created_at': ...}
 ```
 
-`/metrics` (Prometheus, `prometheus-client` was a D0 dependency, unused until now)
+`/metrics` (Prometheus, `prometheus-client` was a dependency from the very start of the project, unused until now)
 confirmed live after 3 real requests (401, 200, 403):
 
 ```text
@@ -243,9 +246,9 @@ ask_auth_failures_total{reason="invalid_credentials"} 1.0
 ask_auth_failures_total{reason="role_mismatch"} 1.0
 ```
 
-### Reliability fixes from the ngày 25 (vault) measurements
+### Reliability fixes from a dedicated measurement pass
 
-| Finding (vault, ngày 25) | Fix | Measured result |
+| Finding | Fix | Measured result |
 |---|---|---|
 | New DB connection per request: ~15ms/call vs ~1.7ms reused | `psycopg_pool.ConnectionPool` in `src/db.py` | ~5.5ms/call through the pool — real improvement (~3×), not the theoretical best (pool checkout has its own small cost) |
 | No `statement_timeout` — only connection has a timeout (ADR-005) | `postgres_statement_timeout_ms=5000`, wired into `database_url` | `SHOW statement_timeout` confirms `5s` on a real connection |
@@ -254,33 +257,35 @@ ask_auth_failures_total{reason="role_mismatch"} 1.0
 ### Not yet measured
 
 - Retry jitter's actual effect on the concurrent-503 rate (ADR-016) — the original
-  ngày 25 scenario has not been re-run post-fix.
+  scenario has not been re-run post-fix.
 - Connection pool behaviour under real concurrent load (only measured sequentially).
 - AuthN is possession-based (API key), not JWT/OAuth2 — no expiry, no instant
   revocation. See ADR-015 for upgrade conditions.
 
-## D5 — final report on a fresh held-out set
+## Final report on a fresh held-out set
 
 **Measured:** 15/09/2026. **Model:** `gemini-3.1-flash-lite` (router + generation),
-`gemini-embedding-001` at 384 dimensions — same pins as D2–D4, unchanged for this
-report. **Reproduce:** `uv run python -m scripts.run_held_out_eval --report` (reads
+`gemini-embedding-001` at 384 dimensions — same pins as every earlier section,
+unchanged for this report. **Reproduce:**
+`uv run python -m scripts.run_held_out_eval --report` (reads
 the sealed results on disk; the run itself cannot be repeated — see below).
 
 ### The held-out set
 
-`eval/final.jsonl` was empty since D2 by design (ADR-010): the original 5 held-out
-questions were scored too early and folded into dev instead. D5 writes a **genuinely
-new** 12-question set, after D3 (agent routing) and D4 (auth/RBAC/audit) exist, so
-it can test the system D5 is actually meant to evaluate — not just retrieval.
+`eval/final.jsonl` was empty from early on by design (ADR-010): the original 5
+held-out questions were scored too early and folded into dev instead. This report
+writes a **genuinely new** 12-question set, only once agent routing and
+auth/RBAC/audit both exist, so it can test the system it is actually meant to
+evaluate — not just retrieval.
 
-The 12 questions were chosen to close two specific gaps the D2–D4 reports already
-named as unmeasured, not to repeat what `eval/dev.jsonl` (25 questions, docs-only)
-already covers:
+The 12 questions were chosen to close two specific gaps earlier sections of this
+report already named as unmeasured, not to repeat what `eval/dev.jsonl` (25
+questions, docs-only) already covers:
 
 | Coverage | Questions | Why |
 |---|---|---|
-| SQL-only (own department, cross-department via executive, RBAC-blocked, provisional/non-final month) | H01–H04 | `eval/dev.jsonl` never exercises the SQL tool at all — it predates the D3 agent |
-| Combined SQL+docs in one question | H07, H08 | D3's report flagged this as "observed but not in a dedicated eval set" |
+| SQL-only (own department, cross-department via executive, RBAC-blocked, provisional/non-final month) | H01–H04 | `eval/dev.jsonl` never exercises the SQL tool at all — it predates the agent |
+| Combined SQL+docs in one question | H07, H08 | the agent-routing section flagged this as "observed but not in a dedicated eval set" |
 | Docs, fresh RBAC combination not in dev | H05, H06 | new role×chunk-access-level pairs not seen in dev |
 | No-knowledge abstain, and SQL "no data for this month" abstain | H09, H10 | two different abstain *reasons* that look identical to the caller but are different code paths |
 | Docs, strong paraphrase (low vocabulary overlap with the source chunk) | H11, H12 | same style as ADR-011's hybrid-retrieval probe, applied to the full agent |
@@ -343,7 +348,7 @@ infra errors have no latency to report):
 
 **Token cost** (real `usageMetadata.totalTokenCount`, read from `audit_log` — see
 ADR-018; this is the first time this project has a real number here instead of `NULL`
-in every row since D1):
+in every row):
 
 | | |
 |---|---:|
@@ -362,12 +367,12 @@ Per `AGENTS.md`: "seeing a held-out score and continuing to tune, then reporting
 again on the same set" is explicitly forbidden. All three issues below are real,
 reproduced with a server log line, and **left unfixed** — they are backlog items for
 whichever session picks this project up next, not silently absorbed into a better
-D5 number.
+final number.
 
 1. **Router sometimes drops one tool from a combined question (H07).** Asked in one
    sentence for both a revenue figure and a related policy fact, the router chose
-   `sql` only — the exact failure mode D3's report already flagged from one manual
-   test, now confirmed on a second, independent question. Sample size is tiny (2
+   `sql` only — the exact failure mode the agent-routing section already flagged from
+   one manual test, now confirmed on a second, independent question. Sample size is tiny (2
    combined questions in this set, 1 failed) — not a rate, a confirmed existence
    proof of the gap.
 2. **A self-contradictory model response has no graceful fallback (H08).** Server
@@ -387,7 +392,7 @@ D5 number.
    those exact exception types for `sql_tool`/`docs_tool`. ADR-016's jitter work
    assumed the retry loop was reached; here it never was.
 
-### What D5 did not attempt
+### What this report did not attempt
 
 - Fixing the three findings above (see previous section for why).
 - A held-out rerun after fixing them — would need a **new** held-out set, since this

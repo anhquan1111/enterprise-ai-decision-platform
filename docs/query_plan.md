@@ -127,7 +127,7 @@ hai điều kiện bằng phía sau không dùng được index hiệu quả n�
 - **Chưa có ANN index** (HNSW/IVFFlat) cho cột `embedding`. Ở vài trăm chunk, exact
   search nhanh hơn và không có sai số. Mở khi số đo nói cần, không mở vì nghe hợp lý.
 - **Chưa đo với concurrency.** Cả ba plan ở trên là một truy vấn đơn lẻ trên máy rảnh.
-  Con số latency dưới tải đồng thời là việc của D4.
+  Con số latency dưới tải đồng thời là việc của giai đoạn xác thực & độ tin cậy.
 - Các con số này đo trên **Docker trên Windows**, không phải trên phần cứng
   production. Chúng dùng để so sánh ba kế hoạch với nhau, không phải để báo latency
   của hệ thống.
