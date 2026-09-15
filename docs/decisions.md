@@ -1308,3 +1308,33 @@ phải viết hai nhánh lỗi khác nhau ở tầng gọi.
 hết hạn bị từ chối, ký sai secret bị từ chối, algorithm confusion bị từ chối,
 thiếu claim bị từ chối, thiếu secret cấu hình báo lỗi rõ ràng ở cả issue lẫn
 verify.** 183 test không-integration vẫn xanh sau khi thêm.
+
+**Bước 2/3: `POST /auth/token` — đổi API key lấy JWT, `/ask` không đổi gì.** Endpoint
+mới nhận `Authorization: Bearer <api_key>`, xác thực bằng đúng `authenticate()` đã
+có (không thêm cơ chế xác thực thứ hai — hệ thống này không có username/password,
+JWT chỉ là một dạng khác của cùng danh tính API key đã chứng minh), rồi ký token
+bằng `issue_token()` từ bước 1/3. Trả về `TokenResponse`
+(`access_token`/`token_type`/`expires_in`, đặt tên theo đúng quy ước OAuth2 RFC
+6749 §5.1 dù đây không phải OAuth2 đầy đủ — quy ước quen thuộc, không bịa tên field
+riêng). `/ask` không sửa một dòng nào ở bước này — API key vẫn là đường xác thực
+duy nhất cho tới bước 3/3.
+
+**Test (`tests/test_api.py`, 3 ca mới): 200 kèm token hợp lệ khi API key đúng, 401
+khi thiếu header, 401 khi API key sai — cùng mẫu test đã có cho `/ask`.** Một chi
+tiết kỹ thuật đáng ghi: `src/api.py` đọc `Settings` MỘT LẦN ở mức module
+(`settings = get_settings()` lúc import), nên test không so `expires_in` với một
+giá trị `Settings` đọc lại sau đó (`get_settings()` gọi lại sẽ tạo instance MỚI,
+không phản ánh vào biến module đã gán) — chỉ kiểm `expires_in` là số dương, tránh
+một assertion trông có vẻ đúng nhưng thực ra so hai nguồn cấu hình khác nhau.
+
+**Một lỗi thật gặp khi đo qua container thật, không phải chỉ tin test mock.**
+`compose.yaml`'s service `api` liệt kê tường minh từng biến môi trường truyền vào
+container (`POSTGRES_*`, `LLM_*`) — không có `.env` nào tự động "chảy" vào bên
+trong, kể cả khi biến đó có sẵn trên host. Thêm `JWT_SECRET_KEY`/`.env` ở host
+không đủ: gọi `/auth/token` qua container thật ban đầu trả `Internal Server Error`
+(500), log container cho thấy đúng `RuntimeError: JWT_SECRET_KEY rỗng`. Vá bằng
+cách thêm ba dòng `JWT_SECRET_KEY`/`JWT_ALGORITHM`/`JWT_EXPIRY_MINUTES` vào
+`environment:` của service `api` trong `compose.yaml`, đúng mẫu các biến khác đã
+có. Xác nhận lại bằng request thật (không phải test mock): `curl -X POST
+/auth/token` trả token, decode payload xác nhận đúng
+`sub`/`role`/`department`/`exp-iat=3600s`.

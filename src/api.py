@@ -25,8 +25,17 @@ from src.auth import AuthenticationError, authenticate
 from src.config import get_settings
 from src.db import check_connection
 from src.generation import SchemaFailure
+from src.jwt_auth import issue_token
 from src.metrics import ask_auth_failures_total, ask_request_duration_seconds, ask_requests_total
-from src.schemas import AskRequest, AskResponse, Citation, HealthResponse, ReadyResponse, ToolUsed
+from src.schemas import (
+    AskRequest,
+    AskResponse,
+    Citation,
+    HealthResponse,
+    ReadyResponse,
+    TokenResponse,
+    ToolUsed,
+)
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
@@ -76,6 +85,32 @@ def metrics() -> Response:
     thực — đúng quy ước Prometheus thông thường (bảo vệ bằng network
     policy/reverse proxy, không phải app-level auth)."""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.post("/auth/token", response_model=TokenResponse, tags=["auth"])
+def issue_jwt(authorization: str | None = Header(default=None)) -> JSONResponse:
+    """Đổi một API key hợp lệ lấy một JWT ngắn hạn (bước 2/3 của ADR-028).
+
+    API key vẫn xác thực trực tiếp cho `/ask` y hệt trước — endpoint này KHÔNG thay
+    thế đường đó, chỉ cấp thêm một lựa chọn. Dùng đúng `authenticate()` đã có (API
+    key) để xác minh danh tính trước khi ký token — không thêm cơ chế xác thực thứ
+    hai nào (không username/password, hệ thống này không có khái niệm đó); JWT ở
+    đây là một dạng khác của cùng một danh tính đã được API key chứng minh, không
+    phải một đường tin tưởng độc lập.
+    """
+    try:
+        employee = authenticate(authorization)
+    except AuthenticationError as exc:
+        logger.warning("auth/token xac thuc that bai: %s", exc)
+        ask_auth_failures_total.labels(reason="invalid_credentials").inc()
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "khong xac thuc duoc"},
+        )
+
+    token = issue_token(employee)
+    response = TokenResponse(access_token=token, expires_in=settings.jwt_expiry_minutes * 60)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=response.model_dump())
 
 
 def _to_response_citations(result: AgentAnswer) -> list[Citation]:

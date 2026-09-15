@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from src import api
 from src.agent.loop import AgentAnswer
 from src.auth import AuthenticatedEmployee, AuthenticationError
+from src.config import get_settings
 from src.generation import Citation
 
 client = TestClient(api.app)
@@ -63,6 +64,43 @@ def test_metrics_endpoint_exposes_prometheus_format() -> None:
 
     assert response.status_code == 200
     assert "text/plain" in response.headers["content-type"]
+
+
+def test_auth_token_returns_jwt_for_valid_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ADR-028 bước 2/3: API key hợp lệ đổi được một JWT — không mock issue_token,
+    để hàm ký thật chạy (test_jwt_auth.py đã kiểm riêng cơ chế ký/xác minh). Tự đặt
+    JWT_SECRET_KEY qua monkeypatch, không dựa vào .env của máy đang chạy test
+    (isolate_settings_from_local_env chỉ tắt đọc file .env, không xoá biến môi
+    trường đã export sẵn trong shell)."""
+    mock_authenticated_as(monkeypatch)
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-du-dai-de-qua-canh-bao-do-dai")
+    get_settings.cache_clear()
+
+    response = client.post("/auth/token", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body["access_token"], str) and body["access_token"]
+    assert body["token_type"] == "bearer"
+    assert isinstance(body["expires_in"], int) and body["expires_in"] > 0
+
+
+def test_auth_token_returns_401_without_authorization_header() -> None:
+    """Không mock authenticate — để hàm thật chạy, khớp đúng hành vi /ask."""
+    response = client.post("/auth/token")
+
+    assert response.status_code == 401
+
+
+def test_auth_token_returns_401_for_invalid_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    def raise_auth_error(header: str | None) -> None:
+        raise AuthenticationError("khong khop")
+
+    monkeypatch.setattr(api, "authenticate", raise_auth_error)
+
+    response = client.post("/auth/token", headers=AUTH_HEADERS)
+
+    assert response.status_code == 401
 
 
 def test_ask_rejects_unknown_role() -> None:

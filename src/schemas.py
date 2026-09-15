@@ -94,3 +94,16 @@ class ReadyResponse(BaseModel):
 
     ready: bool
     checks: dict[str, str]
+
+
+class TokenResponse(BaseModel):
+    """Kết quả của POST /auth/token — đổi một API key hợp lệ lấy một JWT ngắn hạn.
+
+    Đặt tên field theo đúng quy ước OAuth2 (``access_token``/``token_type``/
+    ``expires_in``, RFC 6749 §5.1) dù đây không phải OAuth2 đầy đủ — quy ước quen
+    thuộc, không cần bịa tên field riêng.
+    """
+
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
