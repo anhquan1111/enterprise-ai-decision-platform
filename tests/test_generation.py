@@ -106,6 +106,55 @@ def test_check_grounding_passes_valid_answer() -> None:
     assert check_grounding(answer, allowed_chunk_ids={"A#0"}) == []
 
 
+# ── Answer: mâu thuẫn abstained=true kèm citations (D5, ADR-020) ────
+
+
+def test_answer_drops_citations_and_flags_when_abstained_but_model_sent_citations() -> None:
+    """Trước đây đây là ValueError ở model_validator -> SchemaFailure -> 502
+    (phát hiện qua held-out H08, xem ADR-019). Giờ tự sửa: giữ abstained=true,
+    bỏ citations, đánh dấu để không âm thầm."""
+    answer = Answer(
+        answer="khong tim thay",
+        citations=[Citation(chunk_id="A#0", quote="mau thuan")],
+        abstained=True,
+    )
+
+    assert answer.abstained is True
+    assert answer.citations == []
+    assert answer.self_contradiction_corrected is True
+
+
+def test_check_grounding_flags_self_contradiction_correction() -> None:
+    answer = Answer(
+        answer="khong tim thay", citations=[Citation(chunk_id="A#0", quote="x")], abstained=True
+    )
+
+    problems = check_grounding(answer, allowed_chunk_ids={"A#0"})
+
+    assert any("tự động bỏ citations" in p for p in problems)
+
+
+def test_answer_question_degrades_gracefully_instead_of_502_on_self_contradiction(
+    monkeypatch,  # type: ignore[no-untyped-def]
+) -> None:
+    """Đường end-to-end: Gemini trả về đúng response tự mâu thuẫn đã gặp thật ở
+    held-out H08 — answer_question() không còn raise SchemaFailure vì nó."""
+    contradictory = json.dumps(
+        {
+            "answer": "khong tim thay tai lieu lien quan",
+            "citations": [{"chunk_id": "A#0", "quote": "con sot lai"}],
+            "abstained": True,
+        }
+    )
+    fake_gemini_response(monkeypatch, [(200, contradictory)])
+
+    result = answer_question("cau hoi", [make_chunk("A#0")])
+
+    assert result.answer.abstained is True
+    assert result.answer.citations == []
+    assert any("tự động bỏ citations" in p for p in result.grounding_problems)
+
+
 # ── answer_question: đường không gọi mạng ───────────────────────
 
 
@@ -161,6 +210,43 @@ def test_answer_question_does_not_retry_on_client_error(monkeypatch) -> None:  #
     fake_gemini_response(monkeypatch, [(400, "")])
 
     with pytest.raises(httpx.HTTPStatusError):
+        answer_question("cau hoi", [make_chunk()])
+
+
+def test_answer_question_retries_after_network_timeout(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """D5 (ADR-020): httpx.TimeoutException/ConnectError không phải status code —
+    trước đây thoát ngay không retry (phát hiện qua held-out H02, xem ADR-019).
+    Giờ phải được thử lại giống hệt một 503."""
+    good = json.dumps({"answer": "qua duoc timeout", "citations": [], "abstained": True})
+    monkeypatch.setattr("src.generation._NETWORK_RETRY_BACKOFF_S", 0.0)
+
+    calls: list[str] = []
+    responses: list[object] = [httpx.TimeoutException("het gio"), (200, good)]
+
+    def fake_post(url: str, **kwargs: object) -> httpx.Response:
+        calls.append(url)
+        item = responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        status, text = item  # type: ignore[misc]
+        body = {"candidates": [{"content": {"parts": [{"text": text}]}, "finishReason": "STOP"}]}
+        return httpx.Response(status, request=httpx.Request("POST", url), json=body)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    result = answer_question("cau hoi", [make_chunk()])
+
+    assert len(calls) == 2
+    assert result.answer.answer == "qua duoc timeout"
+
+
+def test_answer_question_raises_after_network_timeout_exhausts_retries(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr("src.generation._NETWORK_RETRY_BACKOFF_S", 0.0)
+    monkeypatch.setattr(
+        httpx, "post", lambda *a, **kw: (_ for _ in ()).throw(httpx.ConnectError("mat mang"))
+    )
+
+    with pytest.raises(httpx.ConnectError):
         answer_question("cau hoi", [make_chunk()])
 
 

@@ -395,3 +395,23 @@ D5 number.
 - Converting token counts to a currency figure (see above).
 - Load/concurrency testing — this run, like every eval run before it, was
   sequential, one request at a time.
+
+### Follow-up: all three findings fixed in a later session (ADR-020)
+
+Fixing them does not touch this section's numbers or `eval/final.jsonl` — that set
+stays sealed, and these fixes were **not** verified by rerunning it (doing so would
+be exactly the "tune, then rescore the same held-out set" this report already
+declined to do). Summary; full detail in ADR-020:
+
+- **H02 (network timeout not retried):** fixed — `_call_gemini` in both
+  `router.py` and `generation.py` now retries `httpx.TimeoutException`/
+  `ConnectError` the same way it already retried a 503.
+- **H08 (self-contradictory response, 502):** fixed — an `abstained: true`
+  response with leftover `citations` now degrades to a plain abstain (citations
+  dropped, logged in `grounding_problems`) instead of failing schema validation.
+- **H07 (router drops a tool on a combined question):** the router prompt was
+  strengthened (an explicit two-condition checklist plus a worked example).
+  Measured on 6 **new** combined questions, not `eval/dev.jsonl` or
+  `eval/final.jsonl` (`scripts/probe_router_combined_tools.py`,
+  `evidence/router_combined_tools_probe.json`): 6/6 selected both tools. Small
+  sample — evidence of a real improvement, not a guarantee at scale.

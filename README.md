@@ -237,11 +237,10 @@ ADR-011 and [`evidence/hybrid_headroom_probe.json`](evidence/hybrid_headroom_pro
 
 Reproduce: `uv run python -m scripts.run_held_out_eval --report` (the run itself
 cannot be repeated — it is sealed; see `docs/report.md`). The three real bugs this
-run found (router drops a tool on a combined question; a self-contradictory model
-response has no graceful fallback and 502s instead; a raw network timeout to Gemini
-is never retried, unlike a tool-level infra error) are documented in `docs/report.md`
-and ADR-019, and were deliberately **not** fixed-and-rerun — doing so on the same
-held-out set would defeat its purpose.
+run found were deliberately **not** fixed-and-rerun on the spot — doing so on the
+same held-out set would defeat its purpose. A later session fixed all three without
+touching the sealed set or these numbers; see ADR-020 and "Follow-up" in
+`docs/report.md`.
 
 ## Limits
 
@@ -252,17 +251,18 @@ held-out set would defeat its purpose.
   in every error category is a real result on this dataset, not evidence the
   system is reliable in general — see "Not yet measured" in `docs/report.md` for
   what this baseline does not tell you.
-- A question asking for both a number and a policy in one sentence sometimes gets
-  routed to only one tool — observed once at D3, confirmed a second, independent time
-  by the D5 held-out set (1/2 combined questions in that set). Small sample, real gap.
+- A question asking for both a number and a policy in one sentence used to be
+  routed to only one tool sometimes (D3, confirmed by the D5 held-out set). The
+  router prompt was strengthened afterward and measured 6/6 on a fresh probe
+  (`evidence/router_combined_tools_probe.json`) — a real improvement on a small
+  sample, not a guarantee at scale. See ADR-020.
 - A self-contradictory model response (`abstained: true` with a non-empty
-  `citations` list) has no graceful fallback — it 502s after exhausting retries
-  instead of degrading to a plain abstain. Found by the D5 held-out run; see
-  `docs/report.md` and ADR-019.
+  `citations` list) used to 502 after exhausting retries — fixed to degrade to a
+  plain abstain instead (citations dropped, logged in `grounding_problems`). See
+  ADR-020.
 - A raw network timeout talking to Gemini (`httpx.TimeoutException`/`ConnectError`)
-  is never retried in `router.py`/`generation.py`, unlike `loop.py`'s tool-level
-  retry for the same exception types — only HTTP status codes are retried there.
-  Found by the D5 held-out run; see `docs/report.md` and ADR-019.
+  used to skip the retry loop entirely — fixed to retry the same as an HTTP 503.
+  See ADR-020.
 - AuthN (D4) is a possession-based API key, not JWT/OAuth2 — no built-in expiry or
   instant revocation, only manual deletion of `api_key_hash`. See ADR-015.
 - Retry jitter (D4) was added for the exact mechanism measured causing concurrent

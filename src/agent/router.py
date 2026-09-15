@@ -26,6 +26,9 @@ _NETWORK_RETRY_BACKOFF_S = 1.0
 # D4: xem giải thích đầy đủ ở generation.py — đo thật ở ngày 25 (vault) cho thấy
 # nhiều request đồng thời retry cùng lịch làm giảm hiệu quả phục hồi khi rate limit.
 _NETWORK_RETRY_JITTER_S = 0.5
+# D5 (ADR-020): timeout/mất kết nối không phải status code, không tự rơi vào nhánh
+# retry ở dưới — xem giải thích đầy đủ ở generation.py (phát hiện qua held-out H02).
+_NETWORK_LEVEL_RETRYABLE = (httpx.ConnectError, httpx.TimeoutException)
 _SCHEMA_RETRY_ATTEMPTS = 2
 
 GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -39,7 +42,21 @@ SYSTEM_INSTRUCTION = """Ban la router cua mot agent noi bo cong ty. Co 2 tool:
   month_to="2100-01-01" de lay toan bo du lieu hien co.
 - "docs": tra cuu chinh sach/quy trinh noi bo bang van ban. Khong can tham so rieng.
 
-Cau hoi co the can MOT tool, hoac CA HAI (vi du hoi ca so lieu va quy dinh lien quan).
+QUAN TRONG - kiem tra DOC LAP tung dieu kien sau, khong chi chon MOT tool "noi bat
+nhat" trong cau hoi:
+1. Cau hoi co hoi mot con so/so lieu kinh doanh cu the khong (doanh thu, ...)?
+   Neu CO -> "sql" PHAI co trong tools.
+2. Cau hoi co hoi ve chinh sach/quy trinh/quy dinh noi bo khong?
+   Neu CO -> "docs" PHAI co trong tools.
+Neu CA HAI dieu kien deu dung, tools PHAI la ["sql","docs"] - khong duoc chi chon
+mot cai du cau hoi hoi ca hai.
+
+Vi du cau hoi can CA HAI tool:
+Cau hoi: "Doanh thu sales thang 1 nam 2026 la bao nhieu, va nhan vien kinh doanh
+duoc tu quyet giam gia toi da bao nhieu phan tram?"
+Tra loi dung: {"tools": ["sql","docs"], "sql_args": {"department": "sales",
+"month_from": "2026-01-01", "month_to": "2026-01-01"}}
+
 Tra ve CHI mot JSON object dung dinh dang:
 {"tools": ["sql"] hoac ["docs"] hoac ["sql","docs"],
  "sql_args": {...} hoac bo qua neu khong dung sql}
@@ -97,20 +114,29 @@ def _call_gemini(prompt: str) -> tuple[str, int]:
         },
     }
 
-    last_exc: httpx.HTTPStatusError | None = None
+    last_exc: Exception | None = None
+    response: httpx.Response | None = None
     for attempt in range(_NETWORK_RETRY_ATTEMPTS):
-        response = httpx.post(
-            GENERATE_URL.format(model=settings.llm_model),
-            headers={"x-goog-api-key": settings.llm_api_key, "Content-Type": "application/json"},
-            timeout=REQUEST_TIMEOUT,
-            json=payload,
-        )
-        if response.status_code not in _RETRYABLE_STATUS:
-            response.raise_for_status()
-            break
-        last_exc = httpx.HTTPStatusError(
-            f"{response.status_code} tạm thời", request=response.request, response=response
-        )
+        try:
+            response = httpx.post(
+                GENERATE_URL.format(model=settings.llm_model),
+                headers={
+                    "x-goog-api-key": settings.llm_api_key,
+                    "Content-Type": "application/json",
+                },
+                timeout=REQUEST_TIMEOUT,
+                json=payload,
+            )
+        except _NETWORK_LEVEL_RETRYABLE as exc:
+            last_exc = exc
+            response = None
+        else:
+            if response.status_code not in _RETRYABLE_STATUS:
+                response.raise_for_status()
+                break
+            last_exc = httpx.HTTPStatusError(
+                f"{response.status_code} tạm thời", request=response.request, response=response
+            )
         if attempt < _NETWORK_RETRY_ATTEMPTS - 1:
             time.sleep(
                 _NETWORK_RETRY_BACKOFF_S * (2**attempt) + random.uniform(0, _NETWORK_RETRY_JITTER_S)
@@ -119,6 +145,7 @@ def _call_gemini(prompt: str) -> tuple[str, int]:
         assert last_exc is not None
         raise last_exc
 
+    assert response is not None
     body = response.json()
     candidate = body["candidates"][0]
     text = "".join(p.get("text", "") for p in candidate.get("content", {}).get("parts", []))

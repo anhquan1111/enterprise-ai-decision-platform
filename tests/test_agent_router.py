@@ -94,3 +94,37 @@ def test_route_retries_transient_network_error(monkeypatch: pytest.MonkeyPatch) 
 
     assert result.plan.tools == ["docs"]
     assert len(calls) == 2
+
+
+def test_route_retries_after_real_timeout_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D5 (ADR-020): httpx.TimeoutException khi GOI httpx.post khong phai status
+    code, trước đây thoát ngay không retry (held-out H02, xem ADR-019)."""
+    monkeypatch.setattr("src.agent.router._NETWORK_RETRY_BACKOFF_S", 0.0)
+    calls: list[str] = []
+    responses: list[object] = [httpx.TimeoutException("het gio"), (200, '{"tools": ["docs"]}')]
+
+    def fake_post(url: str, **kwargs: object) -> httpx.Response:
+        calls.append(url)
+        item = responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        status, text = item  # type: ignore[misc]
+        body = {"candidates": [{"content": {"parts": [{"text": text}]}, "finishReason": "STOP"}]}
+        return httpx.Response(status, request=httpx.Request("POST", url), json=body)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    result = route("cau hoi bat ky")
+
+    assert result.plan.tools == ["docs"]
+    assert len(calls) == 2
+
+
+def test_route_raises_after_timeout_exhausts_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("src.agent.router._NETWORK_RETRY_BACKOFF_S", 0.0)
+    monkeypatch.setattr(
+        httpx, "post", lambda *a, **kw: (_ for _ in ()).throw(httpx.ConnectError("mat mang"))
+    )
+
+    with pytest.raises(httpx.ConnectError):
+        route("cau hoi bat ky")

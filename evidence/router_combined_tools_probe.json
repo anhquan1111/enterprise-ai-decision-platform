@@ -1,0 +1,62 @@
+{
+  "measured_at": "2026-09-15T04:58:43+00:00",
+  "n_questions": 6,
+  "n_got_both_tools": 6,
+  "rate": "6/6",
+  "rows": [
+    {
+      "question": "Doanh thu sales thang 2 nam 2026 la bao nhieu, va nhan vien kinh doanh hien tai duoc tu quyet giam gia toi da bao nhieu phan tram?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 603
+    },
+    {
+      "question": "Doanh thu phong hr thang 3 nam 2026 la bao nhieu, va nhan vien duoc nghi phep bao nhieu ngay mot nam?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 594
+    },
+    {
+      "question": "Doanh thu ky thuat thang 4 nam 2026 la bao nhieu, va truoc khi len production mot ban release phai qua buoc nao?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 595
+    },
+    {
+      "question": "Doanh thu finance thang 5 nam 2026 la bao nhieu, va nhan vien duoc de xuat chi toi da bao nhieu ma khong can duyet them?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 600
+    },
+    {
+      "question": "So sanh doanh thu sales thang 3 va thang 4 nam 2026, va cho biet chinh sach giam gia hien tai danh cho nhan vien la gi?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 599
+    },
+    {
+      "question": "Doanh thu ky thuat 6 thang dau nam 2026 la bao nhieu, va quyen truy cap du lieu khach hang duoc cap va thu hoi nhu the nao?",
+      "tools": [
+        "sql",
+        "docs"
+      ],
+      "got_both": true,
+      "total_tokens": 600
+    }
+  ]
+}

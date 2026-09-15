@@ -27,6 +27,11 @@ _NETWORK_RETRY_BACKOFF_S = 1.0
 # lại rate limit ở cùng một thời điểm — 2/3 request đồng thời nhận 503 dù retry đã
 # chạy. Jitter làm các request retry lệch pha nhau, giảm khả năng va lại.
 _NETWORK_RETRY_JITTER_S = 0.5
+# D5 (ADR-020): timeout/mất kết nối khi GỌI httpx.post không phải là một status
+# code, nên trước đây thoát khỏi vòng retry ngay lập tức — phát hiện qua tập
+# held-out (H02: "upstream call failed: The read operation timed out" -> 503
+# không hề thử lại). Coi hai lớp lỗi này tương đương lỗi status tạm thời.
+_NETWORK_LEVEL_RETRYABLE = (httpx.ConnectError, httpx.TimeoutException)
 
 GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 REQUEST_TIMEOUT = 60.0
@@ -50,11 +55,22 @@ class Answer(BaseModel):
     answer: str = Field(min_length=1)
     citations: list[Citation]
     abstained: bool
+    # D5 (ADR-020): True khi model tự mâu thuẫn (abstained=true kèm citations) và
+    # citations bị bỏ để giữ tín hiệu abstained — xem model_validator bên dưới.
+    self_contradiction_corrected: bool = False
 
     @model_validator(mode="after")
-    def abstain_means_no_citation(self) -> "Answer":
+    def normalize_abstain_citations(self) -> "Answer":
+        """Model đôi khi trả abstained=true kèm citations còn sót — mâu thuẫn
+        trong chính output của model, không phải lỗi hệ thống (phát hiện qua
+        held-out H08, xem ADR-019). Trước đây raise ValueError ở đây khiến cả
+        response bị coi là sai schema, retry rồi 502 — dù tín hiệu "từ chối trả
+        lời" (abstained=true) là tín hiệu AN TOÀN, đáng tin hơn các citation thừa
+        đi kèm. Giữ abstained=true, bỏ citations thừa, và ghi lại đã sửa (không
+        âm thầm) để check_grounding() đưa vào grounding_problems."""
         if self.abstained and self.citations:
-            raise ValueError("abstained=true nhưng vẫn có citations")
+            self.citations = []
+            self.self_contradiction_corrected = True
         return self
 
 
@@ -116,20 +132,31 @@ def _call_gemini(prompt: str) -> tuple[str, str | None, int]:
         },
     }
 
-    last_exc: httpx.HTTPStatusError | None = None
+    last_exc: Exception | None = None
+    response: httpx.Response | None = None
     for attempt in range(_NETWORK_RETRY_ATTEMPTS):
-        response = httpx.post(
-            GENERATE_URL.format(model=settings.llm_model),
-            headers={"x-goog-api-key": settings.llm_api_key, "Content-Type": "application/json"},
-            timeout=REQUEST_TIMEOUT,
-            json=payload,
-        )
-        if response.status_code not in _RETRYABLE_STATUS:
-            response.raise_for_status()
-            break
-        last_exc = httpx.HTTPStatusError(
-            f"{response.status_code} tạm thời", request=response.request, response=response
-        )
+        try:
+            response = httpx.post(
+                GENERATE_URL.format(model=settings.llm_model),
+                headers={
+                    "x-goog-api-key": settings.llm_api_key,
+                    "Content-Type": "application/json",
+                },
+                timeout=REQUEST_TIMEOUT,
+                json=payload,
+            )
+        except _NETWORK_LEVEL_RETRYABLE as exc:
+            # D5 (ADR-020): timeout/connect that ket noi khong phai loi HTTP status,
+            # nen khong roi vao nhanh ben duoi - truoc day thoat ngay khong retry.
+            last_exc = exc
+            response = None
+        else:
+            if response.status_code not in _RETRYABLE_STATUS:
+                response.raise_for_status()
+                break
+            last_exc = httpx.HTTPStatusError(
+                f"{response.status_code} tạm thời", request=response.request, response=response
+            )
         if attempt < _NETWORK_RETRY_ATTEMPTS - 1:
             time.sleep(
                 _NETWORK_RETRY_BACKOFF_S * (2**attempt) + random.uniform(0, _NETWORK_RETRY_JITTER_S)
@@ -138,6 +165,7 @@ def _call_gemini(prompt: str) -> tuple[str, str | None, int]:
         assert last_exc is not None
         raise last_exc
 
+    assert response is not None
     body = response.json()
     candidate = body["candidates"][0]
     text = "".join(p.get("text", "") for p in candidate.get("content", {}).get("parts", []))
@@ -165,6 +193,10 @@ def check_grounding(answer: Answer, allowed_chunk_ids: set[str]) -> list[str]:
     """Cổng bằng chứng — chạy sau cổng schema. Không kiểm quote có thật trong chunk,
     chỉ kiểm chunk_id có nằm trong ngữ cảnh đã đưa cho model hay không."""
     problems: list[str] = []
+    if answer.self_contradiction_corrected:
+        problems.append(
+            "model trả abstained=true kèm citations — đã tự động bỏ citations, giữ abstained (D5)"
+        )
     for c in answer.citations:
         if c.chunk_id not in allowed_chunk_ids:
             problems.append(f"citation trỏ tới chunk ngoài context: {c.chunk_id}")

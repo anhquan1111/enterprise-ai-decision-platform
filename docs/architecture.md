@@ -110,15 +110,17 @@ a baseline measured first, "hybrid search is better" is an opinion.
   never rephrased by an LLM (ADR-013).
 - Hybrid retrieval was measured and deliberately **not built** at D3 — dense embeddings
   handled every paraphrase tried, including deliberately hard ones. See ADR-011.
-- A question asking for both a number and a policy in one sentence sometimes gets
-  routed to only one tool — observed once at D3, confirmed a second, independent time
-  by the D5 held-out set. See `docs/report.md` (D5) and ADR-019.
+- A question asking for both a number and a policy in one sentence used to be routed
+  to only one tool sometimes (D3, confirmed by the D5 held-out set) — the router
+  prompt was strengthened afterward, measured 6/6 on a fresh probe. Small sample,
+  not a guarantee at scale. See ADR-020.
 - A self-contradictory model response (`abstained: true` with non-empty citations)
-  has no graceful fallback — 502s after retries instead of degrading to a plain
-  abstain. Found by the D5 held-out run; see `docs/report.md` and ADR-019.
-- A raw network timeout to Gemini (`httpx.TimeoutException`/`ConnectError`) is never
-  retried in `router.py`/`generation.py`, unlike `loop.py`'s tool-level retry for the
-  same exception types. Found by the D5 held-out run; see `docs/report.md` and ADR-019.
+  used to 502 after retries — now degrades to a plain abstain instead (citations
+  dropped, logged in `grounding_problems`). Found by the D5 held-out run, fixed
+  afterward without touching the sealed set. See ADR-020.
+- A raw network timeout to Gemini (`httpx.TimeoutException`/`ConnectError`) used to
+  skip `router.py`/`generation.py`'s retry loop entirely — now retried the same as
+  an HTTP 503. Found by the D5 held-out run, fixed afterward. See ADR-020.
 - AuthN (D4) is possession-based API keys, not JWT/OAuth2 — no built-in expiry or
   instant revocation (only manual deletion of `api_key_hash`). See ADR-015 for when
   to upgrade.

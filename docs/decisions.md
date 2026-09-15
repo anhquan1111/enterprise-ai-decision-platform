@@ -793,3 +793,60 @@ held-out rồi tiếp tục tinh chỉnh và báo lại trên chính tập đó"
 sửa lỗi thật, hệ quả (một held-out report được tinh chỉnh sau khi thấy điểm) giống hệt
 nhau. Ba phát hiện được ghi lại làm backlog cho phiên sau, kèm bằng chứng log server
 cụ thể — không bị giấu, không bị vá âm thầm.
+
+---
+
+## ADR-020 — Vá ba phát hiện của D5, không đụng lại tập held-out đã niêm phong
+
+**Ngày:** phiên sau D5 · **Trạng thái:** accepted
+
+**Bối cảnh.** ADR-019 để nguyên ba lỗi thật (H02, H07, H08) không vá, đúng luật
+"không tinh chỉnh rồi báo lại trên cùng tập held-out". Phiên này vá cả ba — điều đó
+**không** vi phạm ADR-019, vì không có ý định chạy lại 12 câu `eval/final.jsonl` để
+lấy một con số held-out mới. `eval/final.jsonl` vẫn được xem là đã niêm phong; báo
+cáo D5 trong `docs/report.md` không bị sửa lại theo các fix này.
+
+**Fix 1 — timeout mạng không được retry (H02).** `router.py::_call_gemini` và
+`generation.py::_call_gemini` chỉ retry dựa trên HTTP status code
+(`_RETRYABLE_STATUS`); một `httpx.TimeoutException`/`ConnectError` ném ra ngay từ
+lệnh gọi `httpx.post()` không rơi vào nhánh retry nào, thoát thẳng ra ngoài. Sửa:
+bọc `httpx.post()` trong `try/except` bắt riêng hai loại lỗi này
+(`_NETWORK_LEVEL_RETRYABLE`), coi tương đương một status tạm thời — cùng backoff +
+jitter đã có từ ADR-016. Test: `test_answer_question_retries_after_network_timeout`,
+`test_route_retries_after_real_timeout_exception` (mock `httpx.post` ném exception
+thật ở lượt đầu, thành công ở lượt hai).
+
+**Fix 2 — response tự mâu thuẫn ra 502 thay vì suy biến mềm (H08).** Model đôi khi
+trả `abstained=true` kèm `citations` không rỗng — tự mâu thuẫn trong chính output
+của Gemini, không phải lỗi hệ thống. Validator cũ (`abstain_means_no_citation`)
+raise `ValueError`, khiến cả response bị coi là sai schema → retry → hết lượt →
+`SchemaFailure` → 502. **Quyết định:** tín hiệu `abstained=true` an toàn hơn (từ
+chối trả lời) so với các citation thừa đi kèm nó — giữ `abstained=true`, xoá
+`citations`, không raise. Đổi tên validator thành `normalize_abstain_citations`,
+thêm cờ `Answer.self_contradiction_corrected: bool` để `check_grounding()` vẫn ghi
+lại sự kiện vào `grounding_problems` — sửa nhưng không giấu, cùng nguyên tắc minh
+bạch đã áp dụng cho hai bug đo lường ở D2. Test:
+`test_answer_question_degrades_gracefully_instead_of_502_on_self_contradiction`
+(mô phỏng đúng response tự mâu thuẫn đã gặp thật ở H08).
+
+**Cân nhắc bị loại:** giữ nguyên hành vi raise, chỉ thêm retry — bị loại vì retry
+không sửa được gì (model có xu hướng lặp lại đúng kiểu mâu thuẫn đó ở lần thử thứ
+hai, như đã thấy ở log thật của H08: `SchemaFailure` sau đúng 2 lần).
+
+**Fix 3 — router bỏ sót một tool ở câu hỏi kết hợp (H07).** `SYSTEM_INSTRUCTION` cũ
+chỉ nói "có thể cần CẢ HAI" trong một câu, không có ví dụ minh hoạ. Sửa: thêm một
+checklist hai bước bắt kiểm tra ĐỘC LẬP từng điều kiện (có hỏi số liệu không, có
+hỏi chính sách không) thay vì chọn một tool "nổi bật nhất", cộng một ví dụ JSON đầy
+đủ cho câu hỏi kết hợp.
+
+Đo bằng `scripts/probe_router_combined_tools.py` — **6 câu hỏi mới**, không trùng
+`eval/dev.jsonl` lẫn `eval/final.jsonl` (không đo lại trên tập đã niêm phong, đúng
+tinh thần ADR-011). Kết quả thật, 15/09/2026: **6/6** câu chọn đúng cả hai tool
+(`evidence/router_combined_tools_probe.json`). Mẫu nhỏ, không phải bằng chứng "đã
+sửa dứt điểm" — router vẫn là một LLM call xác suất, không có gì đảm bảo 100% ở quy
+mô lớn hơn. Ghi nhận đúng mức: đo được một cải thiện thật trên 6 câu, không suy
+rộng thành cam kết.
+
+**Không đo lại H07 bằng chính câu hỏi đó** — H07 nằm trong `eval/final.jsonl` đã
+niêm phong; đo bằng câu hỏi mới là cách duy nhất kiểm được prompt mới mà không phá
+tính "held-out" của tập đó.
