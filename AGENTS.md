@@ -95,7 +95,13 @@ docker compose exec -T db psql -U app -d enterprise_ai -f /sql/05_explain.sql
 # API dev server
 uv run uvicorn src.api:app --reload --port 8010
 # http://127.0.0.1:8010/docs — /ask cần header: Authorization: Bearer <key từ issue_api_keys>
+# http://127.0.0.1:8010/ui/  — giao diện demo tĩnh (ADR-029), 3 nut dang nhap nhanh
+# qua /auth/demo-token (ADR-031, khong can API key) — tu phuc vu cho nguoi xem repo
 # LUÔN kiểm port trống trước khi start — xem mục 6 "Kiểm process cũ đang chiếm port"
+
+# /ui chạy được qua container api CHỈ SAU KHI rebuild image (Dockerfile giờ copy
+# thêm web/) — image cũ trên máy dev không có thư mục này:
+docker compose build api && docker compose up -d api
 
 # Test, lint, types
 uv run pytest tests/ -v -m "not integration"    # Mặc định, không cần DB
@@ -194,6 +200,10 @@ Stub 501 tồn tại đúng một mục đích: một câu trả lời trông nh
 ### pgvector: phải cast tường minh `::vector` trong SQL
 
 `register_vector(conn)` không đủ để psycopg tự nhận ra một `list[float]` truyền qua tham số là kiểu `vector` — nó vẫn gửi đi như mảng `double precision[]`, và PostgreSQL báo `operator does not exist: vector <=> double precision[]`. Luôn viết `%(qvec)s::vector` trong câu SQL, không chỉ dựa vào `register_vector`.
+
+### Không được gõ ký tự `%` trong comment của một file `.sql` chạy qua psycopg
+
+psycopg quét **toàn bộ văn bản** câu lệnh để tìm token cần bind (`%(name)s`) — kể cả bên trong comment `--`. Một dòng comment giải thích "câu này không lọc theo department" bằng chính cú pháp `%(department)s` để minh hoạ đã làm psycopg đòi bind một tham số không tồn tại (`ProgrammingError: query parameter missing: department`); né bằng cách viết nửa vời (`%-ngoặc-s`) vẫn còn một ký tự `%` trơ trọi, ra lỗi khác (`only '%s', '%b', '%t' are allowed as placeholders, got '%-'`). Cả hai lần đều **không unit test mock nào bắt được** — mock `fetch_all` không đi qua psycopg thật, chỉ lộ ra khi gọi qua container thật. Quy tắc: không gõ ký tự `%` trong comment của bất kỳ file `.sql` nào được nạp qua `fetch_all()`/`cur.execute(sql, params)`, kể cả để mô tả cú pháp — mô tả bằng lời. Chi tiết: ADR-030; kiểm tĩnh chống tái diễn: `tests/test_agent_tools.py::test_no_sql_file_has_a_stray_percent_outside_real_placeholders`.
 
 ### So khớp từ khóa tiếng Việt phải bỏ dấu cả hai phía
 

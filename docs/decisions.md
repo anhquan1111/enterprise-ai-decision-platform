@@ -1372,3 +1372,176 @@ bằng API key thật → nhận JWT → `curl -X POST /ask` bằng chính JWT �
 API key nào) → trả lời đúng, có trích dẫn (`HR-001#0`, "12 ngày phép"). Gọi lại
 `/ask` bằng API key CŨ ngay sau đó → vẫn `200` — xác nhận cả ba bước không có bước
 nào làm API key hiện tại ngừng hoạt động, đúng cam kết đặt ra từ đầu ADR này.
+
+---
+
+## ADR-029 — Giao diện demo tĩnh ở `/ui`, chỉ để quay video/GIF, không phải sản phẩm
+
+**Ngày:** 16/09/2026 · **Trạng thái:** accepted
+
+**Bối cảnh.** Dự án chỉ có API — mọi demo trước giờ là `curl` trong terminal
+(`docs/demo_script.md`). Cần một giao diện có thể quay GIF cho README/hồ sơ, nhưng
+đây không phải yêu cầu thêm một sản phẩm frontend thật.
+
+**Quyết định.** HTML/CSS/JS thuần (`web/index.html`, `style.css`, `app.js`), không
+framework, không build step, không Node/npm — nhất quán với nguyên tắc "không thêm
+hạ tầng khi không cần" đã áp dụng xuyên suốt dự án (ADR-002 chọn HTTP thuần thay
+SDK, ADR-014 chọn Gemini vision thay OCR engine cục bộ, ADR-025 thêm Alembic chỉ
+khi thật sự cần). FastAPI tự phục vụ thư mục này qua
+`app.mount("/ui", StaticFiles(directory="web", html=True))`, mount **sau cùng**
+và ở tiền tố riêng — không phải `"/"` — để không có route API nào bị che khuất.
+
+**Luồng xác thực trên UI giống hệt luồng thật, không giả lập.** Người dùng dán API
+key thật (lấy từ `scripts/issue_api_keys.py`) → trang gọi `POST /auth/token` →
+JWT nhận về được **giải mã ở client chỉ để hiển thị** danh tính
+(`employee_id`/`role`/`department` đọc thẳng từ payload, base64url decode, không
+xác minh chữ ký) — quyết định bảo mật thật vẫn luôn nằm ở server
+(`src/jwt_auth.verify_token`), client không bao giờ được tin cho việc đó. Token
+giữ trong biến JS, không `localStorage` — mất khi tải lại trang, đúng bản chất
+"JWT ngắn hạn".
+
+**Ba câu hỏi mẫu dựng sẵn khớp đúng ba tình huống của `docs/demo_script.md`:**
+câu hỏi chính sách (docs), câu hỏi doanh thu đúng phòng ban (sql), câu hỏi doanh
+thu **phòng ban khác** phòng ban thật của người đang đăng nhập (RBAC chặn) — nút
+"sql-blocked" tính `otherDept` động theo `state.department`, không hard-code
+phòng ban cụ thể, nên đúng với bất kỳ tài khoản demo nào đăng nhập.
+
+**Tài khoản demo mới, không đụng key của ai đang dùng.** AGENTS.md liệt rõ:
+"Chạy lại `scripts/issue_api_keys.py` rồi ghi đè `api_key_hash` thủ công cho một
+nhân viên đã có key" là việc **không bao giờ được làm** — mọi nhân viên seed sẵn
+(`emp_001`...`emp_116`, `demo_emp_sales`...) đã có hash, không lấy lại được
+plaintext. Thêm một nhân viên MỚI (`demo_ui_frontend`, sales/employee) rồi chạy
+`issue_api_keys.py` — script này chỉ cấp key cho hàng có `api_key_hash IS NULL`,
+nên không nhân viên nào khác bị ảnh hưởng. Key thật đã cấp một lần, ghi trong
+`docs/demo_script_ui.md`, không lặp lại ở đây (đúng mô hình "hiện đúng một lần").
+
+**Đo thật qua HTTP, không chỉ mở trang xem giao diện.** Chạy `uv run uvicorn
+src.api:app --port 8011` (cổng phụ, không đụng container `api` đang chạy ở 8010),
+gọi đúng bốn bước UI sẽ gọi — `/auth/token`, câu hỏi docs, câu hỏi SQL đúng
+phòng ban, câu hỏi SQL sai phòng ban, và `/ask` không kèm token — bằng `curl`
+y hệt payload JS gửi. Cả năm đều đúng như thiết kế: JWT cấp được, câu trả lời
+docs có trích dẫn thật (`ENG-007#1`), số liệu SQL đúng dữ liệu seed
+(`4.200.000.000 VND`), câu hỏi sai phòng ban bị chặn (`abstained=true`,
+`tool_used=none`), không token bị `401`.
+
+**Chưa làm, ghi rõ để không quên:**
+- Chưa tự tay mở trình duyệt kiểm giao diện — mọi xác nhận ở trên chỉ qua `curl`,
+  không phải ảnh chụp màn hình hay video thật. Người dùng cần tự mở
+  `http://127.0.0.1:8010/ui/` kiểm trước khi quay.
+- Không có test tự động nào cho `web/*.js` — đây là công cụ quay demo, không phải
+  đường chạy production; không đưa vào `tests/` theo đúng phạm vi ADR này.
+- Ảnh Docker `enterprise-ai-api:local` đang chạy **chưa build lại** — nó không có
+  `/ui` cho tới khi rebuild. Muốn quay qua container thật cần
+  `docker compose build api && docker compose up -d api`; cách nhẹ hơn là dừng
+  riêng container `api` và chạy `uvicorn` trên host ở cổng 8010, không đụng
+  `db`/`prometheus`/`grafana` đang chạy.
+
+---
+
+## ADR-030 — Thêm truy vấn so sánh liên phòng ban cho tool SQL; một lỗi psycopg thật bắt được khi chạy qua container
+
+**Ngày:** 16/09/2026 · **Trạng thái:** accepted
+
+**Bối cảnh.** `sql_tool` trước đó chỉ trả lời được đúng một dạng câu hỏi: doanh thu
+của MỘT phòng ban theo khoảng thời gian. Một câu như "so sánh doanh thu giữa các
+phòng ban" không có cách nào trả lời được — không phải vì router không hiểu câu hỏi,
+mà vì không có câu SQL tham số hoá nào cho việc đó. Nhận xét đúng: đây thật sự là một
+giới hạn, không phải một thiết kế đã đủ.
+
+**Quyết định 1 — thêm MỘT câu SQL cố định thứ hai, không phải text-to-SQL tự do.**
+`sql/08_business_metrics_compare.sql` — cùng grain, cùng cách tính `mom_growth_pct`
+bằng window function như `03_business_metrics.sql`, chỉ khác: không lọc theo
+department, trả về mọi phòng ban trong khoảng thời gian. `SqlArgs.query_type`
+(`"single_department"` mặc định | `"compare_departments"`) chọn giữa hai câu đã có
+sẵn — vẫn giữ nguyên nguyên tắc ADR-013 (không bao giờ để LLM tự sinh SQL). Đây là
+lựa chọn có chủ ý: mở rộng số loại câu hỏi trả lời được mà không mở rộng bề mặt tấn
+công (không có SQL injection, không câu truy vấn tốn kém ngoài dự kiến).
+
+**Quyết định 2 — so sánh liên phòng ban chỉ dành cho executive.**
+`scope.can_compare_departments(role)`: khác `can_query_department` (so một phòng ban
+cụ thể với phòng ban người gọi), truy vấn so sánh trả về TẤT CẢ phòng ban cùng lúc —
+không có khái niệm "đúng phòng ban của mình", nên chỉ có "được xem toàn bộ" (executive)
+hoặc "không được xem gì" (employee/manager, kể cả đúng phòng ban của chính họ).
+
+**Quyết định 3 — tận dụng lại `mom_growth_pct` đã tính sẵn nhưng bị bỏ phí.**
+Cả hai câu SQL đều tính tăng trưởng theo tháng bằng `LAG()`/window function từ trước,
+nhưng `sql_tool` chưa từng đưa cột đó vào văn bản trả lời — chi phí tính đã trả, giá
+trị chưa từng tới tay người dùng. `_format_revenue_line()` giờ thêm hậu tố
+`(+x,x% so tháng trước)` khi cột này có giá trị.
+
+**Một lỗi psycopg thật, bắt được khi chạy qua container thật, không phải qua test
+mock.** Viết comment giải thích "câu này KHÔNG lọc theo department" bằng đúng cú
+pháp placeholder `%(department)s` để minh hoạ — psycopg quét **toàn bộ văn bản** câu
+lệnh để tìm token cần bind, **kể cả bên trong comment**, nên nó đòi một tham số
+`department` không hề tồn tại trong câu lệnh thật: `ProgrammingError: query
+parameter missing: department`. Sửa lần một (viết "%-ngoặc-s" để né cú pháp đầy đủ)
+vẫn còn một ký tự `%` trơ trọi, ra lỗi khác:
+`only '%s', '%b', '%t' are allowed as placeholders, got '%-'`. Sửa đúng: bỏ hoàn
+toàn ký tự phần trăm khỏi mọi comment trong file, mô tả bằng lời thay vì bằng ký
+hiệu. **Không unit test mock nào bắt được lỗi này** — `test_executive_can_compare_departments`
+(mock `fetch_all`) xanh cả hai lần sai, vì mock không đi qua psycopg thật. Chỉ lộ ra
+khi gọi `curl` qua container thật (`docker compose build api && up -d api`).
+
+**Vá lỗ hổng test, không chỉ vá lỗi.** Thêm
+`tests/test_sql_integration.py::test_compare_departments_sql_file_actually_executes`
+(chạy `fetch_all` thật với đúng file `.sql`, không mock) và
+`tests/test_agent_tools.py::test_no_sql_file_has_a_stray_percent_outside_real_placeholders`
+(kiểm tĩnh, chạy mặc định không cần DB — quét đúng hai file thật sự đi qua
+`psycopg.execute()` bằng tham số, không quét toàn bộ `sql/*.sql` vì các file
+schema/seed khác chạy bằng `psql -f` trực tiếp, không qua parameter binding của
+psycopg nên không cùng lớp rủi ro).
+
+**Đo thật qua container, cả hai vai trò.** Executive hỏi "so sánh doanh thu giữa các
+phòng ban tháng 1 năm 2026" → trả đúng cả 4 phòng ban với số liệu khớp seed
+(`sales: 4.200.000.000`, `finance: 820.000.000`, `engineering: 1.500.000.000`,
+`hr: 40.000.000`). Manager hỏi cùng câu → `abstained=true`, `tool_used=none`, câu
+SQL so sánh chưa từng chạy — đúng thiết kế Quyết định 2.
+
+---
+
+## ADR-031 — `/auth/demo-token`: đăng nhập nhanh cho trang `/ui` công khai, không hardcode API key vào frontend
+
+**Ngày:** 16/09/2026 · **Trạng thái:** accepted
+
+**Bối cảnh.** Trang `/ui` (ADR-029) cần cho phép một người xem trang công khai (nhà
+tuyển dụng bấm link sau khi deploy lên Render) tự thử ngay, không cần chạy
+`scripts/issue_api_keys.py` hay có quyền truy cập database. Cách đầu tiên định làm —
+tạo 3 tài khoản demo, cấp key thật, rồi ghi thẳng 3 key đó vào `web/app.js` làm nút
+"đăng nhập nhanh" — **bị chính hệ thống phân loại an toàn của công cụ chặn lại**
+(cảnh báo "Credential Leakage") trước khi file được ghi ra đĩa.
+
+**Quyết định.** Không hardcode bất kỳ API key nào vào frontend. Thêm
+`POST /auth/demo-token?role=employee|manager|executive` — cấp JWT thẳng cho đúng ba
+danh tính demo cố định (`_DEMO_ACCOUNTS` trong `src/api.py`), gọi lại nguyên
+`issue_token()` đã có sẵn (`src/jwt_auth.py`), **không kiểm bất kỳ credential nào**.
+Ba nút "đăng nhập nhanh" trên `/ui` gọi endpoint này thay vì gửi kèm một API key có
+sẵn trong source.
+
+**Vì sao đây là quyết định đúng, không chỉ là né cảnh báo của công cụ.** Cảnh báo
+"Credential Leakage" chỉ ra đúng một vấn đề thật: hardcode key vào file sẽ commit
+công khai đi ngược chính kỷ luật dự án đã xây từ ADR-015 (key chỉ hiện **đúng một
+lần** lúc cấp phát, không bao giờ ở dạng plaintext lâu dài trong bất kỳ file nào,
+kể cả file "chỉ để demo"). `/auth/demo-token` giữ đúng nguyên tắc đó: không có API
+key nào của ba tài khoản demo từng xuất hiện trong source code, git history, hay
+network tab trình duyệt — endpoint tự biết cấp JWT cho ai mà không cần một secret
+nào đi kèm request.
+
+**Vì sao bỏ qua xác thực ở ĐÚNG endpoint này là chấp nhận được, không phải một lỗ
+hổng.** Ba danh tính trong `_DEMO_ACCOUNTS` không đứng sau bất kỳ dữ liệu thật hay
+quyền ghi nào — cùng corpus tổng hợp, cùng bảng `monthly_revenue` giả lập đã dùng
+xuyên suốt dự án. `/ask` vẫn chạy đúng toàn bộ RBAC (`can_query_department`,
+`can_compare_departments`) trên danh tính JWT này y hệt một nhân viên thật — endpoint
+chỉ bỏ qua bước "chứng minh bạn là ai", không bỏ qua bước "bạn được phép xem gì sau
+khi đã là ai". Đây KHÔNG phải mẫu áp dụng được cho nhân viên thật — chỉ đúng vì ba
+danh tính này được tạo ra chỉ để làm việc này.
+
+**Đo thật qua container.** Cả ba role (`employee`, `manager`, `executive`) lấy được
+JWT qua `/auth/demo-token` không kèm header nào; JWT giải mã đúng
+`employee_id`/`role`/`department` khớp `_DEMO_ACCOUNTS`; gọi `/ask` bằng JWT đó cho
+câu hỏi so sánh liên phòng ban (role executive) trả đúng cả 4 phòng ban, số liệu
+khớp seed — cùng kết quả như dùng API key thật qua `/auth/token` ở ADR-030, xác nhận
+hai đường xác thực không tạo ra hai luồng RBAC khác nhau.
+
+**Test mới:** `tests/test_api.py::test_demo_token_issues_jwt_without_any_credential`
+(3 ca, mỗi role) và `test_demo_token_rejects_role_outside_fixed_allowlist` (giá trị
+ngoài 3 literal đã khai báo bị FastAPI tự trả 422). 204 test không-integration xanh.
