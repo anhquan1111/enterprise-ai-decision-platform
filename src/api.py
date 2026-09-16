@@ -1,21 +1,14 @@
-"""FastAPI application.
-
-Phạm vi hiện tại (giai đoạn xác thực & độ tin cậy): /ask yêu cầu xác thực thật (API
-key, `src/auth.py`) — role/department dùng cho RBAC lấy từ danh tính đã xác thực,
-KHÔNG phải trường tự khai
-trong body (lỗ hổng đã đo và ghi lại ở vault ngày 26, xem ADR về AuthN). Mỗi request
-được ghi vào audit_log (`src/audit.py`) và đo bằng Prometheus (`src/metrics.py`,
-`/metrics`). Router (Gemini JSON mode) quyết định tool SQL/docs, RBAC kiểm trước khi
-bất kỳ tool nào chạy. Xem ``docs/decisions.md`` cho các quyết định không hiển nhiên.
-"""
+"""Điểm vào FastAPI: định tuyến câu hỏi, xác thực danh tính, kiểm toán và giám sát."""
 
 import logging
 import time
 import uuid
+from typing import Literal
 
 import httpx
 from fastapi import FastAPI, Header, status
 from fastapi.responses import JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from src.agent.loop import AgentAnswer, run_agent
@@ -25,6 +18,7 @@ from src.auth import AuthenticationError, authenticate
 from src.config import get_settings
 from src.db import check_connection
 from src.generation import SchemaFailure
+from src.identity import AuthenticatedEmployee
 from src.jwt_auth import issue_token
 from src.metrics import ask_auth_failures_total, ask_request_duration_seconds, ask_requests_total
 from src.schemas import (
@@ -36,6 +30,10 @@ from src.schemas import (
     TokenResponse,
     ToolUsed,
 )
+
+# ==============================================================================
+# 1. Khởi tạo ứng dụng FastAPI & Cấu hình giám sát
+# ==============================================================================
 
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
@@ -51,9 +49,14 @@ app = FastAPI(
 )
 
 
+# ==============================================================================
+# 2. Endpoint kiểm tra sức khỏe hệ thống (/health, /ready, /metrics)
+# ==============================================================================
+
+
 @app.get("/health", response_model=HealthResponse, tags=["ops"])
 def health() -> HealthResponse:
-    """Liveness: process đang chạy. Cố ý không gọi dependency nào."""
+    """Liveness probe: Xác nhận tiến trình API đang chạy, không kiểm tra CSDL phụ thuộc."""
     return HealthResponse(
         status="ok",
         app=settings.app_name,
@@ -64,13 +67,13 @@ def health() -> HealthResponse:
 
 @app.get("/ready", response_model=ReadyResponse, tags=["ops"])
 def ready() -> JSONResponse:
-    """Readiness: dependency cần để phục vụ request có tới được hay không."""
+    """Readiness probe: Kiểm tra kết nối tới CSDL PostgreSQL phục vụ request."""
     checks: dict[str, str] = {}
     try:
         version = check_connection()
         checks["postgres"] = f"ok ({version.split(',')[0]})"
         is_ready = True
-    except Exception as exc:  # noqa: BLE001 - báo ra cho caller, không nuốt lỗi
+    except Exception as exc:  # noqa: BLE001 - Báo lỗi ra caller, không nuốt lỗi
         checks["postgres"] = f"unreachable: {type(exc).__name__}"
         is_ready = False
 
@@ -81,22 +84,20 @@ def ready() -> JSONResponse:
 
 @app.get("/metrics", tags=["ops"])
 def metrics() -> Response:
-    """Prometheus scrape endpoint (giai đoạn xác thực & độ tin cậy). Không cần xác
-    thực — đúng quy ước Prometheus thông thường (bảo vệ bằng network
-    policy/reverse proxy, không phải app-level auth)."""
+    """Endpoint thu thập số liệu Prometheus: Xuất các metric đo lường hiệu năng và lỗi."""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+# ==============================================================================
+# 3. Endpoint cấp phát vé thông hành JWT (/auth/token)
+# ==============================================================================
 
 
 @app.post("/auth/token", response_model=TokenResponse, tags=["auth"])
 def issue_jwt(authorization: str | None = Header(default=None)) -> JSONResponse:
-    """Đổi một API key hợp lệ lấy một JWT ngắn hạn (bước 2/3 của ADR-028).
+    """Đổi API key dài hạn lấy token JWT ngắn hạn có thời hạn (mặc định 60 phút).
 
-    API key vẫn xác thực trực tiếp cho `/ask` y hệt trước — endpoint này KHÔNG thay
-    thế đường đó, chỉ cấp thêm một lựa chọn. Dùng đúng `authenticate()` đã có (API
-    key) để xác minh danh tính trước khi ký token — không thêm cơ chế xác thực thứ
-    hai nào (không username/password, hệ thống này không có khái niệm đó); JWT ở
-    đây là một dạng khác của cùng một danh tính đã được API key chứng minh, không
-    phải một đường tin tưởng độc lập.
+    Giúp ứng dụng web xác thực nhanh trong RAM mà không cần truy vấn CSDL liên tục.
     """
     try:
         employee = authenticate(authorization)
@@ -113,7 +114,47 @@ def issue_jwt(authorization: str | None = Header(default=None)) -> JSONResponse:
     return JSONResponse(status_code=status.HTTP_200_OK, content=response.model_dump())
 
 
+# Ba danh tính demo CỐ ĐỊNH, chỉ đọc dữ liệu tổng hợp — dùng riêng cho /auth/demo-token
+# (trang /ui công khai) để một người xem trang không cần có API key thật vẫn tự bấm
+# thử được. Không phải nhân viên thật, không có API key nào đứng sau (bỏ qua hẳn bước
+# xác thực credential) — xem ADR-029/031 vì sao KHÔNG hardcode API key thật vào
+# frontend, dùng cách này thay thế.
+_DEMO_ACCOUNTS: dict[str, AuthenticatedEmployee] = {
+    "employee": AuthenticatedEmployee(
+        employee_id="demo_ui_frontend", role="employee", department="sales"
+    ),
+    "manager": AuthenticatedEmployee(
+        employee_id="demo_ui_manager", role="manager", department="finance"
+    ),
+    "executive": AuthenticatedEmployee(
+        employee_id="demo_ui_exec", role="executive", department="finance"
+    ),
+}
+
+
+@app.post("/auth/demo-token", response_model=TokenResponse, tags=["auth"])
+def issue_demo_jwt(role: Literal["employee", "manager", "executive"]) -> JSONResponse:
+    """Cấp JWT cho một trong ba danh tính demo cố định — KHÔNG kiểm bất kỳ credential
+    nào, chỉ để trang `/ui` công khai tự phục vụ (nhà tuyển dụng/người đọc repo bấm
+    thử ngay, không cần chạy `scripts/issue_api_keys.py`).
+
+    Không bao giờ dùng mô hình này cho danh tính nhân viên thật — endpoint này tồn
+    tại đúng vì ba danh tính ở trên không đứng sau bất kỳ dữ liệu thật hay quyền ghi
+    nào, không phải vì "bỏ xác thực" là chấp nhận được nói chung.
+    """
+    employee = _DEMO_ACCOUNTS[role]
+    token = issue_token(employee)
+    response = TokenResponse(access_token=token, expires_in=settings.jwt_expiry_minutes * 60)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=response.model_dump())
+
+
+# ==============================================================================
+# 4. Hàm tiện ích chuyển đổi dữ liệu trích dẫn & ánh xạ công cụ
+# ==============================================================================
+
+
 def _to_response_citations(result: AgentAnswer) -> list[Citation]:
+    """Chuyển đổi trích dẫn từ kết quả agent sang định dạng hợp đồng phản hồi API."""
     doc_citations = [
         Citation(
             source_type=ToolUsed.DOCS,
@@ -136,22 +177,25 @@ _TOOL_USED_MAP = {
 }
 
 
+# ==============================================================================
+# 5. Điểm vào chính xử lý câu hỏi & ghi vết kiểm toán (/ask)
+# ==============================================================================
+
+
 @app.post("/ask", response_model=AskResponse, tags=["qa"])
 def ask(request: AskRequest, authorization: str | None = Header(default=None)) -> JSONResponse:
-    """Trả lời câu hỏi bằng agent 2 tool (giai đoạn agent routing), sau khi xác thực
-    thật (giai đoạn xác thực & độ tin cậy).
+    """Tiếp nhận câu hỏi, xác thực danh tính, điều phối agent và lưu audit log.
 
-    Thứ tự bắt buộc: xác thực (ai gọi đây, THẬT SỰ) → đối chiếu role/department
-    request khớp với danh tính đã xác thực → agent (router chọn SQL/docs/cả hai,
-    RBAC kiểm theo role/department ĐÃ XÁC THỰC, không phải trường tự khai) → audit.
-
-    Cổng bằng chứng (grounding) của phần docs không chặn response — ghi lại để audit,
-    vì một câu trả lời có vấn đề grounding vẫn cần trả về cho người dùng kèm cảnh
-    báo, không phải biến mất thành lỗi 500 im lặng.
+    Quy trình bảo mật & vận hành:
+    1. Xác thực danh tính người gọi qua Header Authorization (JWT hoặc API Key).
+    2. Đối chiếu Zero-Trust: Khóa chặt nếu role/department tự khai báo sai với token.
+    3. Thực thi Agent pipeline: Truy vấn số liệu SQL và tài liệu quy trình.
+    4. Ghi nhận thời gian, token tiêu thụ, lỗi grounding và vết kiểm toán vào audit_log.
     """
     request_id = str(uuid.uuid4())
     started = time.perf_counter()
 
+    # Bước 1: Xác thực danh tính người gọi
     try:
         employee = authenticate(authorization)
     except AuthenticationError as exc:
@@ -163,6 +207,7 @@ def ask(request: AskRequest, authorization: str | None = Header(default=None)) -
             content={"request_id": request_id, "detail": "khong xac thuc duoc"},
         )
 
+    # Bước 2: Kiểm soát Zero-Trust - Ngăn chặn mạo danh vai trò hoặc phòng ban
     if employee.role != request.role.value or employee.department != request.department.value:
         logger.warning(
             "request_id=%s role/department trong body khong khop danh tinh da xac thuc "
@@ -190,10 +235,8 @@ def ask(request: AskRequest, authorization: str | None = Header(default=None)) -
         employee.department,
     )
 
+    # Bước 3: Chạy pipeline Agent dựa trên danh tính đã xác thực (Nguồn chân lý duy nhất)
     try:
-        # Dùng role/department từ danh tính ĐÃ XÁC THỰC, không dùng trường request —
-        # đây là nguồn sự thật duy nhất cho RBAC từ giai đoạn xác thực & độ tin cậy
-        # trở đi (xem ADR về AuthN).
         result = run_agent(
             request.question,
             role=employee.role,
@@ -236,6 +279,7 @@ def ask(request: AskRequest, authorization: str | None = Header(default=None)) -
     ask_requests_total.labels(tool_used=result.tool_used, status="200").inc()
     ask_request_duration_seconds.labels(tool_used=result.tool_used).observe(elapsed_ms / 1000)
 
+    # Bước 4: Lưu nhật ký kiểm toán vĩnh viễn (Audit Log) phục vụ kế toán & FinOps
     record_audit(
         AuditEntry(
             request_id=uuid.UUID(request_id),
@@ -252,6 +296,7 @@ def ask(request: AskRequest, authorization: str | None = Header(default=None)) -
         )
     )
 
+    # Bước 5: Đóng gói phản hồi API
     response = AskResponse(
         request_id=request_id,
         answer=result.answer,
@@ -261,3 +306,13 @@ def ask(request: AskRequest, authorization: str | None = Header(default=None)) -
         latency_ms=elapsed_ms,
     )
     return JSONResponse(status_code=status.HTTP_200_OK, content=response.model_dump())
+
+
+# ==============================================================================
+# 6. Giao diện demo tĩnh (/ui) — chỉ để quay video/GIF, không phải sản phẩm
+# ==============================================================================
+# Mount SAU cùng, và ở một tiền tố riêng (/ui) — không phải "/" — để không bao giờ
+# che khuất một route API nào phía trên nếu path trùng nhau. HTML/CSS/JS thuần, không
+# build step, không framework: nhất quán với nguyên tắc "không thêm hạ tầng khi không
+# cần" đã áp dụng xuyên suốt dự án.
+app.mount("/ui", StaticFiles(directory="web", html=True), name="ui")

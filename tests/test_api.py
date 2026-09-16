@@ -103,6 +103,44 @@ def test_auth_token_returns_401_for_invalid_api_key(monkeypatch: pytest.MonkeyPa
     assert response.status_code == 401
 
 
+@pytest.mark.parametrize(
+    ("role", "employee_id", "department"),
+    [
+        ("employee", "demo_ui_frontend", "sales"),
+        ("manager", "demo_ui_manager", "finance"),
+        ("executive", "demo_ui_exec", "finance"),
+    ],
+)
+def test_demo_token_issues_jwt_without_any_credential(
+    monkeypatch: pytest.MonkeyPatch, role: str, employee_id: str, department: str
+) -> None:
+    """/auth/demo-token (ADR-031) không kiểm bất kỳ Authorization header nào — chỉ
+    dùng cho trang /ui công khai, đúng ba danh tính demo cố định."""
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-du-dai-de-qua-canh-bao-do-dai")
+    get_settings.cache_clear()
+
+    response = client.post(f"/auth/demo-token?role={role}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body["access_token"], str) and body["access_token"]
+
+    from src.jwt_auth import verify_token
+
+    employee = verify_token(body["access_token"])
+    assert employee.employee_id == employee_id
+    assert employee.role == role
+    assert employee.department == department
+
+
+def test_demo_token_rejects_role_outside_fixed_allowlist() -> None:
+    """Không phải một cách tạo danh tính tuỳ ý — chỉ đúng 3 giá trị literal đã khai
+    báo, FastAPI tự trả 422 cho bất kỳ giá trị nào khác."""
+    response = client.post("/auth/demo-token?role=ceo_of_everything")
+
+    assert response.status_code == 422
+
+
 def test_ask_rejects_unknown_role() -> None:
     """Role lạ là vi phạm hợp đồng request, không phải câu hỏi cần trả lời.
 

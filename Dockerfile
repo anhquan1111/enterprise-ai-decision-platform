@@ -18,6 +18,10 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src/ ./src/
 COPY sql/ ./sql/
+# Giao diện demo tĩnh (/ui) — HTML/CSS/JS thuần, không build step. StaticFiles đòi
+# thư mục này TỒN TẠI ngay lúc app khởi động (app.mount trong src/api.py), thiếu
+# COPY này thì container crash ngay khi start, không phải lỗi 404 êm ái. ADR-029.
+COPY web/ ./web/
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
