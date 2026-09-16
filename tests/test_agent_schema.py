@@ -59,3 +59,27 @@ def test_both_tools_is_valid() -> None:
     )
 
     assert plan.tools == ["sql", "docs"]
+
+
+def test_single_department_defaults_query_type() -> None:
+    """query_type mặc định phải là 'single_department' để không phá vỡ các lệnh gọi
+    cũ chưa biết về loại truy vấn mới."""
+    args = SqlArgs(department="sales", month_from="2026-01-01", month_to="2026-01-01")
+
+    assert args.query_type == "single_department"
+
+
+def test_compare_departments_does_not_require_department() -> None:
+    args = SqlArgs(query_type="compare_departments", month_from="2026-01-01", month_to="2026-06-01")
+
+    assert args.department is None
+
+
+def test_single_department_without_department_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        SqlArgs(query_type="single_department", month_from="2026-01-01", month_to="2026-06-01")
+
+
+def test_unknown_query_type_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        SqlArgs(query_type="delete_everything", month_from="2026-01-01", month_to="2026-06-01")

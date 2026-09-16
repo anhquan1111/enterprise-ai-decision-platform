@@ -12,6 +12,8 @@ Chạy:
 Bị loại khỏi suite mặc định nên CI vẫn xanh khi không có database.
 """
 
+from pathlib import Path
+
 import pytest
 
 from src.contracts import visible_access_levels
@@ -20,6 +22,7 @@ from src.db import fetch_all, fetch_one, get_connection
 pytestmark = pytest.mark.integration
 
 AS_OF = "2026-09-01 00:00+00"
+_SQL_DIR = Path(__file__).parent.parent / "sql"
 
 
 def test_join_to_departments_does_not_multiply_rows() -> None:
@@ -75,6 +78,20 @@ def test_mom_growth_is_negative_where_revenue_dropped() -> None:
 
     assert by_month["2026-01-01"]["prev"] is None
     assert by_month["2026-03-01"]["revenue_vnd"] < by_month["2026-03-01"]["prev"]
+
+
+def test_compare_departments_sql_file_actually_executes() -> None:
+    """Đo trực tiếp qua psycopg thật, không mock fetch_all — bắt đúng lớp lỗi mà một
+    unit test mock không bao giờ thấy được (ADR-030): một ký tự phần trăm còn sót
+    trong COMMENT của file .sql khiến psycopg đòi bind tham số không tồn tại, hoặc từ
+    chối cú pháp placeholder — cả hai chỉ lộ ra khi câu lệnh thật sự chạy qua psycopg.
+    """
+    sql = (_SQL_DIR / "08_business_metrics_compare.sql").read_text(encoding="utf-8")
+
+    rows = fetch_all(sql, {"month_from": "2026-01-01", "month_to": "2026-01-01"})
+
+    departments = {r["department"] for r in rows}
+    assert departments == {"engineering", "finance", "hr", "sales"}
 
 
 def test_employee_sees_fewer_chunks_than_executive() -> None:

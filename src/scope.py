@@ -1,15 +1,9 @@
-"""Phạm vi quyền truy cập — thuần logic, không phụ thuộc thư viện nặng.
+"""Quy tắc phân quyền RBAC: Xác định phạm vi truy cập tài liệu và số liệu SQL theo vai trò."""
 
-Tách riêng khỏi ``src/contracts.py`` có lý do cụ thể: contracts import pandas để
-validate batch ingestion, nhưng đường serving chỉ cần tra một dict. Để chung thì mọi
-nơi dùng phạm vi quyền đều phải kéo theo pandas và numpy — đã gặp thật: script
-benchmark chết vì OpenBLAS không cấp được bộ nhớ, trong khi nó không cần pandas.
+# 1. Phân quyền Tài liệu (Document RBAC Hierarchy & Constants)
+# File này là thuần Python (không import pandas/numpy) để phục vụ API serving siêu nhẹ.
 
-Module này là nguồn sự thật duy nhất về "role nào đọc được mức nào", dùng chung cho cả
-ingestion và truy vấn. Hai bản sao của quy tắc quyền là cách sinh lỗi cách ly dữ liệu.
-"""
-
-# Thứ bậc quyền: một role đọc được mức của chính nó và mọi mức thấp hơn.
+# Thứ bậc quyền tài liệu: Role cao hơn được đọc tài liệu ở mức của mình và mọi mức thấp hơn
 ROLE_VISIBLE_LEVELS: dict[str, tuple[str, ...]] = {
     "employee": ("employee",),
     "manager": ("employee", "manager"),
@@ -20,27 +14,29 @@ ALLOWED_ACCESS_LEVELS: frozenset[str] = frozenset({"employee", "manager", "execu
 ALLOWED_DEPARTMENTS: frozenset[str] = frozenset({"sales", "hr", "finance", "engineering"})
 
 
+# 2. Truy vấn Mức quyền Tài liệu (visible_access_levels)
 def visible_access_levels(role: str) -> list[str]:
-    """Các mức quyền mà một role được đọc.
-
-    Role lạ trả về danh sách rỗng thay vì mức thấp nhất: không biết người gọi là ai thì
-    không cho thấy gì, chứ không đoán.
-    """
+    """Trả về danh sách mức quyền tài liệu được phép đọc; role lạ trả về rỗng (Fail-closed)."""
     return list(ROLE_VISIBLE_LEVELS.get(role, ()))
 
 
+# 3. Phân quyền Số liệu Kinh doanh (SQL Department Boundary)
 def can_query_department(*, role: str, caller_department: str, target_department: str) -> bool:
-    """Ranh giới quyền cho tool SQL (giai đoạn agent routing) — khác ranh giới của
-    docs retrieval (ADR-009).
-
-    ADR-009 đã chốt: doanh thu một phòng ban là số liệu phòng ban đó sở hữu, một nhân
-    viên phòng khác không cần thấy nó ở dạng số thô. Quyết định cụ thể (ADR-011):
-    ``employee``/``manager`` chỉ xem được phòng ban của chính mình; ``executive`` xem
-    được mọi phòng ban (giám sát toàn công ty). Role lạ luôn bị chặn — không đoán quyền
-    cho một role hệ thống không biết, giống nguyên tắc của ``visible_access_levels``.
-    """
+    """Kiểm tra quyền truy vấn SQL: employee/manager chỉ xem phòng mình, executive xem hết."""
     if role == "executive":
         return True
     if role in ("employee", "manager"):
         return caller_department == target_department
     return False
+
+
+def can_compare_departments(*, role: str) -> bool:
+    """Truy vấn so sánh doanh thu LIÊN phòng ban chỉ dành cho executive.
+
+    Khác `can_query_department` (so một phòng ban cụ thể với phòng ban của người
+    gọi): truy vấn so sánh trả về TẤT CẢ phòng ban trong cùng một lần, nên không có
+    khái niệm "đúng phòng ban của mình" — hoặc được xem toàn bộ, hoặc không được xem
+    gì. Một manager/employee dù đúng phòng ban vẫn không có lý do nghiệp vụ để thấy
+    số liệu phòng ban khác chỉ vì đi kèm trong một bảng so sánh.
+    """
+    return role == "executive"

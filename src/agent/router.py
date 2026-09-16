@@ -1,11 +1,6 @@
-"""Router: goi Gemini (JSON mode) de quyet dinh cau hoi can tool nao.
+"""Router phân loại ý đồ câu hỏi: gọi Gemini (JSON mode) để chọn công cụ phù hợp.
 
-Ap dung dung mau da chot o generation.py — JSON mode, retry mang tach biet khoi retry
-schema, khong fallback van xuoi. Day KHONG phai mot vong lap ReAct nhieu buoc: kien
-truc /ask (docs/architecture.md) chi can MOT quyet dinh phan loai ("so lieu, quy tac,
-hay ca hai"), khong can agent tu de xuat tung buoc mot nhu bai hoc Ngay 22 — o do vong
-lap nhieu buoc can thiet vi khong biet truoc so tool se dung; o day kien truc da co
-dung 2 tool co dinh, biet truoc hinh dang cau tra loi.
+Áp dụng phân loại một lượt có cấu trúc: tách biệt retry mạng với retry schema, không fallback.
 """
 
 import json
@@ -20,16 +15,17 @@ from src.config import get_settings
 
 from .schema import ToolPlan
 
+# 1. Cấu Hình & Tham Số Thử Lại Mạng (Network Retry & Jitter)
+
+# 429 (rate limit) và 5xx (lỗi server) mang tính tạm thời nên retry có tác dụng phục hồi.
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 _NETWORK_RETRY_ATTEMPTS = 3
 _NETWORK_RETRY_BACKOFF_S = 1.0
-# Giai đoạn xác thực & độ tin cậy: xem giải thích đầy đủ ở generation.py — đo thật ở
-# ngày 25 (vault) cho thấy nhiều request đồng thời retry cùng lịch làm giảm hiệu quả
-# phục hồi khi rate limit.
+
+# Jitter ngẫu nhiên làm lệch pha các request đồng thời, tránh hiện tượng thundering herd.
 _NETWORK_RETRY_JITTER_S = 0.5
-# Giai đoạn báo cáo cuối (ADR-020): timeout/mất kết nối không phải status code,
-# không tự rơi vào nhánh retry ở dưới — xem giải thích đầy đủ ở generation.py (phát
-# hiện qua held-out H02).
+
+# Bắt riêng lỗi rớt mạng hoặc timeout tầng socket để tiếp tục thử lại (ADR-020).
 _NETWORK_LEVEL_RETRYABLE = (httpx.ConnectError, httpx.TimeoutException)
 _SCHEMA_RETRY_ATTEMPTS = 2
 
@@ -37,12 +33,21 @@ GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:
 REQUEST_TIMEOUT = 30.0
 
 SYSTEM_INSTRUCTION = """Bạn là router của một agent nội bộ công ty. Có 2 tool:
-- "sql": tra số liệu doanh thu theo phòng ban và tháng. Cần sql_args:
-  department (một trong "engineering","finance","hr","sales"),
-  month_from, month_to (định dạng YYYY-MM-01).
-  Nếu câu hỏi không nêu rõ khoảng thời gian, dùng month_from="2000-01-01" và
-  month_to="2100-01-01" để lấy toàn bộ dữ liệu hiện có.
+- "sql": tra số liệu doanh thu. Cần sql_args với hai loại query_type:
+  * query_type="single_department" (mặc định, dùng khi câu hỏi hỏi về MỘT phòng
+    ban cụ thể): cần thêm department (một trong "engineering","finance","hr","sales").
+  * query_type="compare_departments" (dùng khi câu hỏi SO SÁNH nhiều phòng ban,
+    hoặc hỏi doanh thu "các phòng ban"/"toàn công ty" chung chung): KHÔNG cần
+    department.
+  Cả hai đều cần month_from, month_to (định dạng YYYY-MM-01). Nếu câu hỏi không
+  nêu rõ khoảng thời gian, dùng month_from="2000-01-01" và month_to="2100-01-01"
+  để lấy toàn bộ dữ liệu hiện có.
 - "docs": tra cứu chính sách/quy trình nội bộ bằng văn bản. Không cần tham số riêng.
+
+Ví dụ câu hỏi so sánh liên phòng ban:
+Câu hỏi: "So sanh doanh thu giua cac phong ban thang 1 nam 2026"
+Trả lời đúng: {"tools": ["sql"], "sql_args": {"query_type": "compare_departments",
+"month_from": "2026-01-01", "month_to": "2026-01-01"}}
 
 QUAN TRỌNG - kiểm tra ĐỘC LẬP từng điều kiện sau, không chỉ chọn MỘT tool "nổi bật
 nhất" trong câu hỏi:
@@ -65,13 +70,13 @@ Trả về CHỈ một JSON object đúng định dạng:
 Không thêm chữ nào khác ngoài JSON."""
 
 
-class RouterSchemaFailure(Exception):
-    """Router trả sai định dạng ở mọi lần thử — không đoán bừa nên tool nào, dừng rõ
-    ràng để tầng gọi (agent loop) quyết định abstain, không phải fallback sang docs.
+# 2. Ngoại Lệ & Đối Tượng Kết Quả Router (Custom Exceptions & Result)
 
-    Mang theo total_tokens (giai đoạn báo cáo cuối): các lượt gọi đã thử đều tốn tiền
-    thật dù cuối cùng thất bại — tầng gọi cần con số này để hạch toán chi phí đúng,
-    không chỉ tính token trên đường thành công.
+
+class RouterSchemaFailure(Exception):
+    """Router trả sai định dạng JSON ở mọi lần thử; không đoán mò mà dừng để loop xử lý.
+
+    Mang theo total_tokens để tầng gọi hạch toán đầy đủ chi phí token của các lượt thử thất bại.
     """
 
     def __init__(self, message: str, total_tokens: int = 0) -> None:
@@ -81,15 +86,17 @@ class RouterSchemaFailure(Exception):
 
 @dataclass(frozen=True)
 class RouterResult:
-    """Bọc ToolPlan cùng chi phí token thật của lần gọi router (giai đoạn báo cáo cuối) — tách khỏi
-    ToolPlan vì đó là schema phản ánh đúng hợp đồng JSON với Gemini, không phải chỗ
-    để nhét thêm metadata đo lường."""
+    """Kết quả phân loại gồm ToolPlan và tổng số token thực tế đã sử dụng cho lần gọi router."""
 
     plan: ToolPlan
     total_tokens: int
 
 
+# 3. Bóc Tách Chuỗi JSON Phòng Thủ (_extract_json)
+
+
 def _extract_json(raw: str) -> str:
+    """Bóc tách phần JSON thuần túy, loại bỏ các khối markdown code fence (```json ... ```)."""
     text = raw.strip()
     if "```" in text:
         start = text.find("```")
@@ -104,7 +111,11 @@ def _extract_json(raw: str) -> str:
     return text
 
 
+# 4. Giao Tiếp LLM Gemini Để Phân Loại (_call_gemini)
+
+
 def _call_gemini(prompt: str) -> tuple[str, int]:
+    """Gọi Gemini phân loại với temperature=0.0 để đạt tính nhất quán tối đa và kèm retry."""
     settings = get_settings()
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
@@ -155,10 +166,14 @@ def _call_gemini(prompt: str) -> tuple[str, int]:
     return text, total_tokens
 
 
+# 5. Hàm Phân Loại Ý Đồ Câu Hỏi (route)
+
+
 def route(question: str) -> RouterResult:
-    """Quyết định tool cần gọi cho một câu hỏi. Không biết role/department của người
-    hỏi — router chỉ phân loại Ý ĐỊNH câu hỏi; RBAC áp riêng ở tầng thực thi tool
-    (``tools.py``), không trộn hai quyết định vào một bước."""
+    """Quyết định tool cần gọi cho một câu hỏi dựa trên ý đồ, không phụ thuộc vào quyền hạn.
+
+    Phân quyền RBAC được tách biệt hoàn toàn và chỉ áp dụng ở tầng thực thi (tools.py).
+    """
     prompt = f"Cau hoi: {question}"
     last_error: str | None = None
     total_tokens = 0

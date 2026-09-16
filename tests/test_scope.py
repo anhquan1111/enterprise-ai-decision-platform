@@ -5,7 +5,7 @@ Tach rieng test_contracts.py vi visible_access_levels da co test o do cho duong 
 day chi test them ranh gioi moi cho duong SQL.
 """
 
-from src.scope import can_query_department
+from src.scope import can_compare_departments, can_query_department
 
 
 def test_employee_can_query_own_department() -> None:
@@ -38,3 +38,10 @@ def test_unknown_role_is_denied_not_guessed() -> None:
     assert not can_query_department(
         role="ceo_of_everything", caller_department="sales", target_department="sales"
     )
+
+
+def test_only_executive_can_compare_departments() -> None:
+    assert can_compare_departments(role="executive")
+    assert not can_compare_departments(role="manager")
+    assert not can_compare_departments(role="employee")
+    assert not can_compare_departments(role="ceo_of_everything")
