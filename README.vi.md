@@ -1,12 +1,47 @@
 # Enterprise AI Decision Platform (Tiếng Việt)
 
+🇻🇳 Tiếng Việt | 🇬🇧 [English](README.md)
+
 API hỏi đáp nội bộ cho doanh nghiệp: nhân viên hỏi bằng ngôn ngữ tự nhiên, hệ thống tự quyết định câu trả lời nằm ở **số liệu kinh doanh (SQL)** hay **tài liệu quy trình nội bộ (retrieval)**, rồi trả lời **kèm trích dẫn nguồn**, **chỉ trong phạm vi quyền của người hỏi**, và **ghi nhật ký kiểm toán (audit log)** cho mọi lượt truy vấn.
 
-> **Trạng thái: báo cáo cuối cùng, vòng 2, trên tập held-out độc lập.** Sau khi corpus chuyển sang tiếng Việt có dấu đầy đủ (ADR-022), tập held-out vòng 1 và kết quả cũ được giữ nguyên làm hồ sơ lịch sử, và một tập 12 câu hoàn toàn mới (`eval/final.jsonl`) được viết và chạy **đúng một lần** qua endpoint `/ask` thật với cơ chế xác thực thật — 11/12 câu đúng, 1 lỗi phân loại router thật (đúng kiểu lỗi của vòng 1, tái xuất hiện sau một lần đã sửa — xem bên dưới), 0 lỗi hạ tầng ở trạng thái cuối cùng. Giữa lúc chạy, phát hiện và vá một lỗ hổng độ tin cậy thật: `src/embeddings.py` trước đây không hề có logic retry, khác với đường gọi generation/router, nên một lần 503 thoáng qua từ API embedding là giết chết ngay bất kỳ request nào chạm tới docs (ADR-024). Độ trễ thật p50/p95 và chi phí token thật cho mỗi request đọc từ `audit_log`. Chi tiết toàn bộ kết quả và lý do giữ nguyên không sửa lỗi router tái phát: [`docs/report.md`](docs/report.md) (mục "Final report, round 2") và ADR-024. Báo cáo vòng 1 (9/12, trên corpus trước khi có dấu) được giữ nguyên làm hồ sơ lịch sử trong cùng file.
->
-> Endpoint `/ask` yêu cầu API key thật (`Authorization: Bearer <key>`) — RBAC chạy dựa trên role/department **đã được xác thực**, không dùng trường tự khai báo trong body request, đóng một lỗ hổng bảo mật thật đã được kiểm chứng bằng thực nghiệm (ADR-015, có log `curl` trước/sau trong `docs/report.md`). Mọi request đều được ghi vào `audit_log` và expose tại `/metrics` (Prometheus). `/ask` định tuyến từng câu hỏi (Gemini phân loại `sql` / `docs` / cả hai) và trả về số liệu SQL nguyên bản, tuyệt đối không để LLM diễn giải lại. Baseline retrieval: 18/18 câu hỏi có đáp án được trích xuất chính xác, 0 trích dẫn bịa đặt, 0 vi phạm quyền trên 25 câu dev; hybrid retrieval đã được đo đạc trước và **quyết định không xây dựng** — đạt 5/5 recall trên 5 câu diễn giải khó, không có khoảng trống nào cần bù đắp (ADR-011). Trình tự xây dựng và tiến độ: [`AGENTS.md`](AGENTS.md#7-kế-hoạch-xây-dựng). Hướng dẫn thứ tự đọc chi tiết toàn bộ dự án có tại [`docs/reading_order.md`](docs/reading_order.md).
-
 ![Demo giao diện /ui và Grafana](docs/Demo.gif)
+
+### Trạng thái: báo cáo cuối cùng, vòng 2, trên tập held-out độc lập
+
+- Sau khi corpus chuyển sang tiếng Việt có dấu đầy đủ (ADR-022), tập held-out
+  vòng 1 và kết quả cũ được giữ nguyên làm hồ sơ lịch sử, và một tập 12 câu
+  hoàn toàn mới (`eval/final.jsonl`) được viết và chạy **đúng một lần** qua
+  endpoint `/ask` thật với cơ chế xác thực thật.
+- **11/12 câu đúng**, 1 lỗi phân loại router thật (đúng kiểu lỗi của vòng 1,
+  tái xuất hiện sau một lần đã sửa — xem mục "Giới hạn" bên dưới), **0 lỗi hạ
+  tầng** ở trạng thái cuối cùng.
+- Giữa lúc chạy, phát hiện và vá một lỗ hổng độ tin cậy thật: `src/embeddings.py`
+  trước đây không hề có logic retry, khác với đường gọi generation/router, nên
+  một lần 503 thoáng qua từ API embedding là giết chết ngay bất kỳ request nào
+  chạm tới docs (ADR-024).
+- Độ trễ thật p50/p95 và chi phí token thật cho mỗi request — đều đọc từ
+  `audit_log`, không ước lượng.
+- Chi tiết toàn bộ kết quả và lý do giữ nguyên không sửa lỗi router tái phát:
+  [`docs/report.md`](docs/report.md) (mục "Final report, round 2") và ADR-024.
+  Báo cáo vòng 1 (9/12, trên corpus trước khi có dấu) được giữ nguyên làm hồ
+  sơ lịch sử trong cùng file.
+
+**Bảo mật:** Endpoint `/ask` yêu cầu API key thật (`Authorization: Bearer <key>`)
+— RBAC chạy dựa trên role/department **đã được xác thực**, không dùng trường
+tự khai báo trong body request, đóng một lỗ hổng bảo mật thật đã được kiểm
+chứng bằng thực nghiệm (ADR-015, có log `curl` trước/sau trong `docs/report.md`).
+Mọi request đều được ghi vào `audit_log` và expose tại `/metrics` (Prometheus).
+`/ask` định tuyến từng câu hỏi (Gemini phân loại `sql` / `docs` / cả hai) và
+trả về số liệu SQL nguyên bản, tuyệt đối không để LLM diễn giải lại.
+
+**Baseline retrieval:** 18/18 câu hỏi có đáp án được trích xuất chính xác, 0
+trích dẫn bịa đặt, 0 vi phạm quyền trên 25 câu dev; hybrid retrieval đã được
+đo đạc trước và **quyết định không xây dựng** — đạt 5/5 recall trên 5 câu diễn
+giải khó, không có khoảng trống nào cần bù đắp (ADR-011).
+
+Trình tự xây dựng và tiến độ: [`AGENTS.md`](AGENTS.md#7-kế-hoạch-xây-dựng).
+Hướng dẫn thứ tự đọc chi tiết toàn bộ dự án có tại
+[`docs/reading_order.md`](docs/reading_order.md).
 
 ## Vì sao làm project này
 
@@ -115,7 +150,19 @@ uv run python -m scripts.run_eval --report                       # Đọc báo c
 
 ## Tech stack
 
-Python 3.12 · FastAPI · PostgreSQL 17 + pgvector 0.8.6 · psycopg 3 (raw SQL, không dùng ORM, quản lý pool kết nối qua `psycopg_pool`) · Pydantic 2 · Gemini (`gemini-3.1-flash-lite` cho generation và agent router, `gemini-embedding-001` ở 384 chiều) gọi qua `httpx` thuần (không dùng SDK, không dùng function-calling API — router dùng JSON mode tương tự generation) · prometheus-client (metrics) · pytest · ruff · mypy · Docker Compose · GitHub Actions. MLflow được khai báo sẵn dưới dạng optional extra; chưa dùng tới. BM25 / hybrid retrieval đã được đánh giá khi xây agent và chủ động không xây dựng — xem ADR-011 trong [`docs/decisions.md`](docs/decisions.md).
+| Tầng | Lựa chọn |
+|---|---|
+| Ngôn ngữ / API | Python 3.12 · FastAPI |
+| Database | PostgreSQL 17 + pgvector 0.8.6 · psycopg 3, raw SQL (không dùng ORM), quản lý pool qua `psycopg_pool` |
+| Validation | Pydantic 2 |
+| LLM | Gemini `gemini-3.1-flash-lite` cho generation + agent router; `gemini-embedding-001` ở 384 chiều — gọi qua `httpx` thuần, không dùng SDK, không dùng function-calling API (router dùng JSON mode, cùng cách với generation) |
+| Observability | prometheus-client · Prometheus · Grafana |
+| Testing / quality | pytest · ruff · mypy |
+| Hạ tầng | Docker Compose · GitHub Actions · Render Blueprint (`render.yaml`) |
+
+MLflow được khai báo sẵn dưới dạng optional extra; chưa dùng tới. BM25 /
+hybrid retrieval đã được đánh giá khi xây agent và chủ động không xây dựng —
+xem ADR-011 trong [`docs/decisions.md`](docs/decisions.md).
 
 ## Cấu trúc thư mục
 

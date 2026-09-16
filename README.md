@@ -1,39 +1,51 @@
 # Enterprise AI Decision Platform
 
+🇬🇧 English | 🇻🇳 [Tiếng Việt](README.vi.md)
+
 An internal question-answering API for a company: an employee asks in natural
 language, the system decides whether the answer lives in **business data (SQL)**
 or in **internal policy documents (retrieval)**, and answers **with citations**,
 **only within the asker's access scope**, while **logging every request for
 audit**.
 
-> **Status: final report, round 2, on a fresh held-out set.** After the corpus moved
-> to full-diacritic Vietnamese (ADR-022), the round-1 held-out set and results were
-> kept as history and a genuinely new 12-question set (`eval/final.jsonl`) was
-> written and run **once**, through the real, running `/ask` endpoint with real
-> authentication — 11/12 correct, 1 genuine router mistake (the same failure mode as
-> round 1's, recurring after a prior fix — see below), 0 infrastructure errors in the
-> final state. Mid-run, a real reliability gap was found and fixed: `src/embeddings.py`
-> had no retry logic at all, unlike generation/router calls, so a single transient
-> 503 from the embedding API killed any docs-touching request outright (ADR-024).
-> Real p50/p95 latency and real per-request token cost, read from `audit_log`. Full
-> results and why the recurring router mistake was left unpatched:
-> [`docs/report.md`](docs/report.md) ("Final report, round 2") and ADR-024. Round 1's
-> report (9/12, on the pre-diacritics corpus) is kept as history in the same file.
->
-> `/ask` requires a real API key (`Authorization: Bearer <key>`) — RBAC runs on
-> the **authenticated** role/department, not a self-declared request field, closing a
-> real vulnerability found by testing (ADR-015, exact `curl` before/after in
-> `docs/report.md`). Every request is written to `audit_log` and exposed on
-> `/metrics` (Prometheus). `/ask` routes each question (Gemini classifies `sql` /
-> `docs` / both) and returns SQL figures verbatim, never rephrased by an LLM.
-> Retrieval baseline: 18/18 answerable questions retrieved correctly, 0 fabricated
-> citations, 0 access violations across 25 dev questions; hybrid retrieval was
-> measured and **not built** — 5/5 recall on 5 deliberately hard paraphrases, no gap
-> to fill (ADR-011). Build order and progress: [`AGENTS.md`](AGENTS.md#7-kế-hoạch-xây-dựng).
-> A full, guided reading order for the whole project is in
-> [`docs/reading_order.md`](docs/reading_order.md).
-
 ![UI + Grafana demo](docs/Demo.gif)
+
+### Status: final report, round 2, on a fresh held-out set
+
+- After the corpus moved to full-diacritic Vietnamese (ADR-022), round 1's
+  held-out set/results were kept as history, and a genuinely new 12-question
+  set (`eval/final.jsonl`) was written and run **once**, through the real,
+  running `/ask` endpoint with real authentication.
+- **11/12 correct**, 1 genuine router mistake (the same failure mode as round
+  1's, recurring after a prior fix — see "Limits" below), **0 infrastructure
+  errors** in the final state.
+- Mid-run, a real reliability gap was found and fixed: `src/embeddings.py` had
+  no retry logic at all, unlike generation/router calls, so a single transient
+  503 from the embedding API killed any docs-touching request outright
+  (ADR-024).
+- Real p50/p95 latency and real per-request token cost, both read from
+  `audit_log` — not estimated.
+- Full results and why the recurring router mistake was left unpatched:
+  [`docs/report.md`](docs/report.md) ("Final report, round 2") and ADR-024.
+  Round 1's report (9/12, on the pre-diacritics corpus) is kept as history in
+  the same file.
+
+**Security:** `/ask` requires a real API key (`Authorization: Bearer <key>`) —
+RBAC runs on the **authenticated** role/department, not a self-declared
+request field, closing a real vulnerability found by testing (ADR-015, exact
+`curl` before/after in `docs/report.md`). Every request is written to
+`audit_log` and exposed on `/metrics` (Prometheus). `/ask` routes each
+question (Gemini classifies `sql` / `docs` / both) and returns SQL figures
+verbatim, never rephrased by an LLM.
+
+**Retrieval baseline:** 18/18 answerable questions retrieved correctly, 0
+fabricated citations, 0 access violations across 25 dev questions; hybrid
+retrieval was measured and **not built** — 5/5 recall on 5 deliberately hard
+paraphrases, no gap to fill (ADR-011).
+
+Build order and progress: [`AGENTS.md`](AGENTS.md#7-kế-hoạch-xây-dựng). A
+full, guided reading order for the whole project is in
+[`docs/reading_order.md`](docs/reading_order.md).
 
 ## Why this project
 
@@ -168,15 +180,19 @@ docker compose up -d db api prometheus grafana
 
 ## Tech stack
 
-Python 3.12 · FastAPI · PostgreSQL 17 + pgvector 0.8.6 · psycopg 3 (raw SQL, no
-ORM, pooled connections via `psycopg_pool`) · Pydantic 2 · Gemini
-(`gemini-3.1-flash-lite` for generation and the agent router, `gemini-embedding-001`
-at 384 dims) via plain `httpx` (no SDK, no function-calling API — the router uses
-JSON mode, same pattern as generation) · prometheus-client (metrics) · pytest ·
-ruff · mypy · Docker Compose · GitHub Actions. MLflow is declared as an extra for
-later layers; not used yet. BM25/hybrid retrieval was evaluated during agent
-development and deliberately not built — see ADR-011 in
-[`docs/decisions.md`](docs/decisions.md).
+| Layer | Choice |
+|---|---|
+| Language / API | Python 3.12 · FastAPI |
+| Database | PostgreSQL 17 + pgvector 0.8.6 · psycopg 3, raw SQL (no ORM), pooled via `psycopg_pool` |
+| Validation | Pydantic 2 |
+| LLM | Gemini `gemini-3.1-flash-lite` for generation + the agent router; `gemini-embedding-001` at 384 dims — called over plain `httpx`, no SDK, no function-calling API (router uses JSON mode, same pattern as generation) |
+| Observability | prometheus-client · Prometheus · Grafana |
+| Testing / quality | pytest · ruff · mypy |
+| Infra | Docker Compose · GitHub Actions · Render Blueprint (`render.yaml`) |
+
+MLflow is declared as an extra for later layers; not used yet. BM25/hybrid
+retrieval was evaluated during agent development and deliberately not built —
+see ADR-011 in [`docs/decisions.md`](docs/decisions.md).
 
 ## Project layout
 
