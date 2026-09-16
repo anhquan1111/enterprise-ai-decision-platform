@@ -6,6 +6,8 @@ API hỏi đáp nội bộ cho doanh nghiệp: nhân viên hỏi bằng ngôn ng
 >
 > Endpoint `/ask` yêu cầu API key thật (`Authorization: Bearer <key>`) — RBAC chạy dựa trên role/department **đã được xác thực**, không dùng trường tự khai báo trong body request, đóng một lỗ hổng bảo mật thật đã được kiểm chứng bằng thực nghiệm (ADR-015, có log `curl` trước/sau trong `docs/report.md`). Mọi request đều được ghi vào `audit_log` và expose tại `/metrics` (Prometheus). `/ask` định tuyến từng câu hỏi (Gemini phân loại `sql` / `docs` / cả hai) và trả về số liệu SQL nguyên bản, tuyệt đối không để LLM diễn giải lại. Baseline retrieval: 18/18 câu hỏi có đáp án được trích xuất chính xác, 0 trích dẫn bịa đặt, 0 vi phạm quyền trên 25 câu dev; hybrid retrieval đã được đo đạc trước và **quyết định không xây dựng** — đạt 5/5 recall trên 5 câu diễn giải khó, không có khoảng trống nào cần bù đắp (ADR-011). Trình tự xây dựng và tiến độ: [`AGENTS.md`](AGENTS.md#7-kế-hoạch-xây-dựng). Hướng dẫn thứ tự đọc chi tiết toàn bộ dự án có tại [`docs/reading_order.md`](docs/reading_order.md).
 
+![Demo giao diện /ui và Grafana](docs/Demo.gif)
+
 ## Vì sao làm project này
 
 Ba tính chất quyết định một trợ lý LLM có thực sự dùng được trong doanh nghiệp hay không, và cả ba thường thiếu trong các bản demo thông thường:
@@ -208,11 +210,25 @@ Tái hiện kết quả: `uv run python -m scripts.run_held_out_eval --report` (
 - Cơ chế xác thực AuthN ban đầu chỉ có API key dạng chuỗi bí mật, không hết hạn tự động, thu hồi bằng cách xoá thủ công `api_key_hash` (ADR-015). **`POST /auth/token` giờ đổi một API key hợp lệ lấy một JWT ngắn hạn** (mặc định 60 phút, `HS256`, `authenticate()` chấp nhận cả hai) — API key vẫn dùng trực tiếp cho `/ask` như cũ, không đổi gì; JWT thêm hết hạn tự động, chưa phải thu hồi tức thời (xem ADR-028 để biết còn thiếu gì cho việc đó).
 - Jitter trong cơ chế retry được thêm để giải quyết hiện tượng tranh chấp gây lỗi `503` đồng thời (ADR-016), và đã được đo lại dưới tải đồng thời thật (8 lượt × 3 request, có/không jitter) — không thấy cải thiện đo được dưới mức nghẽn Gemini bất thường cao của phiên đo; ngân sách retry tự nó ngắn hơn một đợt nghẽn kéo dài — một khoảng trống khác với khoảng jitter đã đóng. Xem ADR-026.
 - Chi phí token được quy đổi ra VNĐ/USD dưới dạng một khoảng (`audit_log` chỉ lưu tổng token, chưa tách input/output) — xem ADR-023.
-- Hệ thống chưa triển khai lên cloud; chạy cục bộ qua Docker Compose.
+- Mặc định chạy cục bộ qua Docker Compose. Repo có sẵn Render Blueprint
+  (`render.yaml`) để deploy 1-click lên một URL công khai — xem
+  [`docs/deploy_render.md`](docs/deploy_render.md) để biết các bước cụ thể và
+  giới hạn thật của gói free (cold start, Postgres hết hạn sau 30 ngày).
 
 ## Tài liệu Demo và CV
 
 - [`docs/demo_script.md`](docs/demo_script.md) — Kịch bản demo 2–3 phút, xây dựng hoàn toàn từ các lệnh và kết quả có thể tái hiện ở trên.
+- **`/ui`** — trang demo HTML/CSS/JS thuần (không framework, không build step), do
+  chính API phục vụ tại `http://127.0.0.1:8010/ui/`: ba nút đăng nhập nhanh
+  (employee/manager/executive, qua `POST /auth/demo-token` — không API key nào lộ
+  ra ở frontend, ADR-031), câu hỏi chính sách, câu hỏi doanh thu đúng phòng ban,
+  câu so sánh liên phòng ban (chỉ executive, ADR-030), và một câu hỏi sai phòng
+  ban để xem RBAC chặn — cùng luồng `/auth/token` + `/ask` như bản demo curl,
+  chỉ là dễ bấm hơn, tự phục vụ được cho bất kỳ ai mở link đã deploy.
+- [`docs/demo_script_ui.md`](docs/demo_script_ui.md) — kịch bản quay GIF ~60 giây
+  dùng `/ui` kèm dashboard Grafana thật.
+- [`docs/deploy_render.md`](docs/deploy_render.md) — cách deploy `/ui` lên một URL
+  công khai bằng blueprint `render.yaml` có sẵn.
 - [`docs/cv_bullets.md`](docs/cv_bullets.md) — Các gạch đầu dòng đưa vào CV, mỗi con số đều trỏ về một file hoặc ADR trong repo, không có con số nào được bịa ra ngoài `evidence/`.
 - [`docs/reading_order.md`](docs/reading_order.md) — Thứ tự đọc toàn bộ dự án (khoảng 170 phút).
 

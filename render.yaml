@@ -1,0 +1,84 @@
+# Render Blueprint — triển khai 1-click cho Enterprise AI Decision Platform.
+# Dùng tại: https://dashboard.render.com/blueprints -> New Blueprint Instance ->
+# trỏ vào repo này. Chi tiết đầy đủ + các bước thủ công sau lần deploy đầu tiên
+# (chạy seed data + ingest tài liệu) nằm ở docs/deploy_render.md.
+
+databases:
+  - name: enterprise-ai-db
+    databaseName: enterprise_ai
+    user: app
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: enterprise-ai-decision-platform
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    # Idempotent: op.execute các bảng dùng "CREATE TABLE" không "IF NOT EXISTS" ở
+    # baseline, nhưng alembic tự kiểm bảng alembic_version nên chạy lại vẫn an toàn
+    # (không có gì để upgrade nếu đã ở head).
+    preDeployCommand: "uv run --no-sync alembic upgrade head"
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+
+      # ── PostgreSQL: lấy trực tiếp từ database ở trên, không gõ tay ─────
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: enterprise-ai-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: enterprise-ai-db
+          property: port
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: enterprise-ai-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: enterprise-ai-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: enterprise-ai-db
+          property: password
+
+      # ── LLM (Gemini) — giữ đồng bộ với .env.example / ADR-002 ──────────
+      - key: LLM_PROVIDER
+        value: google
+      - key: LLM_MODEL
+        value: gemini-3.1-flash-lite
+      - key: LLM_MAX_OUTPUT_TOKENS
+        value: "1200"
+      # sync: false — Render sẽ hỏi nhập giá trị thật trong dashboard lúc tạo
+      # blueprint, KHÔNG bao giờ lưu secret vào file này (file này được commit).
+      - key: LLM_API_KEY
+        sync: false
+
+      # ── Embedding (ADR-002) ─────────────────────────────────────────────
+      - key: EMBEDDING_BACKEND
+        value: api
+      - key: EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: EMBEDDING_DIM
+        value: "384"
+      - key: RETRIEVAL_TOP_K
+        value: "5"
+      - key: RRF_K
+        value: "60"
+
+      # ── JWT (ADR-028) ────────────────────────────────────────────────────
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_EXPIRY_MINUTES
+        value: "60"
+      # sync: false — sinh bằng `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+      # rồi dán vào Render dashboard, không commit secret thật vào file này.
+      - key: JWT_SECRET_KEY
+        sync: false

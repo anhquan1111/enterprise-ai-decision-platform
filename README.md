@@ -33,6 +33,8 @@ audit**.
 > A full, guided reading order for the whole project is in
 > [`docs/reading_order.md`](docs/reading_order.md).
 
+![UI + Grafana demo](docs/Demo.gif)
+
 ## Why this project
 
 Three properties decide whether an enterprise can actually use an LLM assistant,
@@ -194,7 +196,8 @@ src/
 ├── scope.py            # Role -> visible access levels (docs); role+dept -> SQL access
 ├── agent/               # router + 2 tools + bounded orchestration pipeline
 │   ├── router.py          # Gemini JSON mode: classifies sql / docs / both
-│   ├── tools.py            # sql_tool (RBAC before query), docs_tool (wraps retrieval.py)
+│   ├── tools.py            # sql_tool: 2 fixed parameterized queries (single dept, cross-dept
+│                       # compare — executive only, ADR-030), RBAC before query; docs_tool
 │   ├── schema.py            # ToolPlan / SqlArgs, two-layer validation
 │   └── loop.py               # route -> RBAC -> execute (retry/timeout) -> summarize
 └── schemas.py           # Request/response contracts
@@ -218,6 +221,8 @@ docker/
 ├── prometheus/prometheus.yml          # scrapes api:8010/metrics every 15s
 └── grafana/provisioning/              # datasource + "ask-overview" dashboard,
                                         # applied on start, nothing to click through
+web/                # /ui demo page: index.html, style.css, app.js — no framework,
+                    # no build step, served directly by FastAPI (ADR-029)
 tests/              # Fast unit tests (mocked); `integration` needs Postgres;
                     # `live_llm` calls real Gemini — neither runs in CI
 ```
@@ -324,12 +329,28 @@ purpose; see ADR-024.
   sustained outage, a different gap than the one jitter closes. See ADR-026.
 - Token cost is converted to VND/USD as a bounded range (`audit_log` stores only
   the combined token count, not the input/output split) — see ADR-023.
-- Not deployed to any cloud provider. It runs locally via Docker Compose.
+- Runs locally via Docker Compose by default. A Render Blueprint (`render.yaml`)
+  is included for one-click deployment to a public URL — see
+  [`docs/deploy_render.md`](docs/deploy_render.md) for the exact steps and known
+  limits of the free tier (cold start, 30-day Postgres expiry).
 
 ## Demo and CV material
 
 - [`docs/demo_script.md`](docs/demo_script.md) — a 2-3 minute walkthrough script,
   built entirely from commands and outputs already reproducible above.
+- **`/ui`** — a plain HTML/CSS/JS demo page (no framework, no build step) served by
+  the API itself at `http://127.0.0.1:8010/ui/`: three one-click demo logins
+  (employee/manager/executive, via `POST /auth/demo-token` — no API key ever appears
+  in the frontend, ADR-031), a policy question, a same-department revenue question,
+  a cross-department comparison (executive only, ADR-030), and a wrong-department
+  one to see RBAC block it — same `/auth/token` + `/ask` flow as the curl demo, just
+  easier to click through, and self-serve for anyone who opens the deployed link.
+  Needs the `api` image rebuilt once (`docker compose build api`) since it postdates
+  the running container — see ADR-029.
+- [`docs/demo_script_ui.md`](docs/demo_script_ui.md) — timed script for a GIF using
+  `/ui` plus the live Grafana dashboard.
+- [`docs/deploy_render.md`](docs/deploy_render.md) — how to deploy `/ui` to a
+  public URL with the included `render.yaml` blueprint.
 - [`docs/cv_bullets.md`](docs/cv_bullets.md) — CV bullets, each traceable to a file or
   ADR in this repo, no number written that isn't measured somewhere in `evidence/`.
 
