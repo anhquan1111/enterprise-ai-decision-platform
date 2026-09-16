@@ -4,6 +4,11 @@
 
 API hỏi đáp nội bộ cho doanh nghiệp: nhân viên hỏi bằng ngôn ngữ tự nhiên, hệ thống tự quyết định câu trả lời nằm ở **số liệu kinh doanh (SQL)** hay **tài liệu quy trình nội bộ (retrieval)**, rồi trả lời **kèm trích dẫn nguồn**, **chỉ trong phạm vi quyền của người hỏi**, và **ghi nhật ký kiểm toán (audit log)** cho mọi lượt truy vấn.
 
+**Demo trực tiếp:** [enterprise-ai-decision-platform.onrender.com](https://enterprise-ai-decision-platform.onrender.com/ui/)
+— tự phục vụ, không cần API key (ba nút đăng nhập nhanh tự cấp JWT, ADR-031).
+Gói free: container sẽ "ngủ" sau một thời gian không có request, nên lần bấm
+đầu tiên sau đó có thể mất 30–50 giây để khởi động lại.
+
 ![Demo giao diện /ui và Grafana](docs/Demo.gif)
 
 ### Trạng thái: báo cáo cuối cùng, vòng 2, trên tập held-out độc lập
@@ -257,8 +262,9 @@ Tái hiện kết quả: `uv run python -m scripts.run_held_out_eval --report` (
 - Cơ chế xác thực AuthN ban đầu chỉ có API key dạng chuỗi bí mật, không hết hạn tự động, thu hồi bằng cách xoá thủ công `api_key_hash` (ADR-015). **`POST /auth/token` giờ đổi một API key hợp lệ lấy một JWT ngắn hạn** (mặc định 60 phút, `HS256`, `authenticate()` chấp nhận cả hai) — API key vẫn dùng trực tiếp cho `/ask` như cũ, không đổi gì; JWT thêm hết hạn tự động, chưa phải thu hồi tức thời (xem ADR-028 để biết còn thiếu gì cho việc đó).
 - Jitter trong cơ chế retry được thêm để giải quyết hiện tượng tranh chấp gây lỗi `503` đồng thời (ADR-016), và đã được đo lại dưới tải đồng thời thật (8 lượt × 3 request, có/không jitter) — không thấy cải thiện đo được dưới mức nghẽn Gemini bất thường cao của phiên đo; ngân sách retry tự nó ngắn hơn một đợt nghẽn kéo dài — một khoảng trống khác với khoảng jitter đã đóng. Xem ADR-026.
 - Chi phí token được quy đổi ra VNĐ/USD dưới dạng một khoảng (`audit_log` chỉ lưu tổng token, chưa tách input/output) — xem ADR-023.
-- Mặc định chạy cục bộ qua Docker Compose. Repo có sẵn Render Blueprint
-  (`render.yaml`) để deploy 1-click lên một URL công khai — xem
+- Mặc định chạy cục bộ qua Docker Compose, và cũng đã deploy tại
+  [enterprise-ai-decision-platform.onrender.com](https://enterprise-ai-decision-platform.onrender.com/ui/)
+  bằng Render Blueprint có sẵn (`render.yaml`) — xem
   [`docs/deploy_render.md`](docs/deploy_render.md) để biết các bước cụ thể và
   giới hạn thật của gói free (cold start, Postgres hết hạn sau 30 ngày).
 
@@ -266,7 +272,9 @@ Tái hiện kết quả: `uv run python -m scripts.run_held_out_eval --report` (
 
 - [`docs/demo_script.md`](docs/demo_script.md) — Kịch bản demo 2–3 phút, xây dựng hoàn toàn từ các lệnh và kết quả có thể tái hiện ở trên.
 - **`/ui`** — trang demo HTML/CSS/JS thuần (không framework, không build step), do
-  chính API phục vụ tại `http://127.0.0.1:8010/ui/`: ba nút đăng nhập nhanh
+  chính API phục vụ, chạy trực tiếp tại
+  [enterprise-ai-decision-platform.onrender.com/ui](https://enterprise-ai-decision-platform.onrender.com/ui/)
+  hoặc cục bộ tại `http://127.0.0.1:8010/ui/`: ba nút đăng nhập nhanh
   (employee/manager/executive, qua `POST /auth/demo-token` — không API key nào lộ
   ra ở frontend, ADR-031), câu hỏi chính sách, câu hỏi doanh thu đúng phòng ban,
   câu so sánh liên phòng ban (chỉ executive, ADR-030), và một câu hỏi sai phòng

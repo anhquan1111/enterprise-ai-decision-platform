@@ -7,7 +7,7 @@ from typing import Literal
 
 import httpx
 from fastapi import FastAPI, Header, status
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
@@ -52,6 +52,13 @@ app = FastAPI(
 # ==============================================================================
 # 2. Endpoint kiểm tra sức khỏe hệ thống (/health, /ready, /metrics)
 # ==============================================================================
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    """Domain gốc (vd. link deploy trên Render) không có route riêng — chuyển thẳng
+    tới trang demo /ui thay vì để FastAPI trả {"detail": "Not Found"} mặc định."""
+    return RedirectResponse(url="/ui/")
 
 
 @app.get("/health", response_model=HealthResponse, tags=["ops"])

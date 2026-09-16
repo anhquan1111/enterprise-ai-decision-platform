@@ -8,6 +8,11 @@ or in **internal policy documents (retrieval)**, and answers **with citations**,
 **only within the asker's access scope**, while **logging every request for
 audit**.
 
+**Live demo:** [enterprise-ai-decision-platform.onrender.com](https://enterprise-ai-decision-platform.onrender.com/ui/)
+— self-serve, no API key needed (three quick-login buttons issue a JWT
+directly, ADR-031). Free tier: the container sleeps after inactivity, so the
+first request after a while can take 30–50s to wake up.
+
 ![UI + Grafana demo](docs/Demo.gif)
 
 ### Status: final report, round 2, on a fresh held-out set
@@ -345,8 +350,9 @@ purpose; see ADR-024.
   sustained outage, a different gap than the one jitter closes. See ADR-026.
 - Token cost is converted to VND/USD as a bounded range (`audit_log` stores only
   the combined token count, not the input/output split) — see ADR-023.
-- Runs locally via Docker Compose by default. A Render Blueprint (`render.yaml`)
-  is included for one-click deployment to a public URL — see
+- Runs locally via Docker Compose by default, and is also deployed at
+  [enterprise-ai-decision-platform.onrender.com](https://enterprise-ai-decision-platform.onrender.com/ui/)
+  via the included Render Blueprint (`render.yaml`) — see
   [`docs/deploy_render.md`](docs/deploy_render.md) for the exact steps and known
   limits of the free tier (cold start, 30-day Postgres expiry).
 
@@ -355,7 +361,9 @@ purpose; see ADR-024.
 - [`docs/demo_script.md`](docs/demo_script.md) — a 2-3 minute walkthrough script,
   built entirely from commands and outputs already reproducible above.
 - **`/ui`** — a plain HTML/CSS/JS demo page (no framework, no build step) served by
-  the API itself at `http://127.0.0.1:8010/ui/`: three one-click demo logins
+  the API itself, live at
+  [enterprise-ai-decision-platform.onrender.com/ui](https://enterprise-ai-decision-platform.onrender.com/ui/)
+  or locally at `http://127.0.0.1:8010/ui/`: three one-click demo logins
   (employee/manager/executive, via `POST /auth/demo-token` — no API key ever appears
   in the frontend, ADR-031), a policy question, a same-department revenue question,
   a cross-department comparison (executive only, ADR-030), and a wrong-department
