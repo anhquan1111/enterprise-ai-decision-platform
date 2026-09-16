@@ -1,8 +1,6 @@
-"""Sinh câu trả lời có cấu trúc từ các chunk đã retrieval, và hai cổng kiểm.
+"""Sinh câu trả lời có cấu trúc từ các chunk văn bản qua hai cổng kiểm duyệt độc lập.
 
-Kiến trúc và các quyết định ở đây là áp dụng trực tiếp những gì đã học và đo ở
-LLM_Inference_&_Structured_Output (ngày 19): JSON mode, thử lại có giới hạn kèm lỗi
-cụ thể, không fallback văn xuôi, và hai cổng tách biệt — schema với bằng chứng.
+Cổng 1 xác thực JSON Schema Pydantic; Cổng 2 kiểm tra tính căn cứ (Grounding) & trích dẫn.
 """
 
 import json
@@ -16,28 +14,27 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 from src.config import get_settings
 from src.retrieval import RetrievedChunk
 
-# 429 (rate limit) và 5xx (lỗi phía server) là tạm thời — thử lại có ích. Mọi mã khác
-# (400 sai request, 401/403 sai quyền) không tự sửa được bằng cách gọi lại, và thử
-# lại một request hỏng chỉ tính tiền hai lần cho cùng một lỗi.
+# 1. Cấu hình & Tham số Thử Lại Mạng (Retry & Jitter)
+
+# 429 (rate limit) và 5xx (lỗi server) mang tính tạm thời nên retry có tác dụng khắc phục.
+# Các mã 4xx khác (400, 401, 403) là lỗi logic cố định, retry sẽ chỉ tốn thêm tiền vô ích.
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 _NETWORK_RETRY_ATTEMPTS = 3
 _NETWORK_RETRY_BACKOFF_S = 1.0
-# Giai đoạn xác thực & độ tin cậy: jitter ngẫu nhiên cộng thêm vào backoff. Đo thật
-# ở ngày 25 (vault): nhiều request đồng thời retry theo ĐÚNG cùng lịch (1s, 2s,
-# 4s...) có xu hướng va lại rate limit ở cùng một thời điểm — 2/3 request đồng thời
-# nhận 503 dù retry đã chạy. Jitter làm các request retry lệch pha nhau, giảm khả
-# năng va lại.
+
+# Jitter ngẫu nhiên làm lệch pha các request đồng thời, tránh hiện tượng thundering herd
+# khiến nhiều worker cùng retry vào một thời điểm và va lại vào ngưỡng rate limit 503.
 _NETWORK_RETRY_JITTER_S = 0.5
-# Giai đoạn báo cáo cuối (ADR-020): timeout/mất kết nối khi GỌI httpx.post không
-# phải là một status code, nên trước đây thoát khỏi vòng retry ngay lập tức — phát
-# hiện qua tập
-# held-out (H02: "upstream call failed: The read operation timed out" -> 503
-# không hề thử lại). Coi hai lớp lỗi này tương đương lỗi status tạm thời.
+
+# Timeout hoặc rớt socket ở tầng mạng không trả HTTP status code nên cần bắt riêng qua exception
+# để tiếp tục vòng retry, tránh việc hệ thống lập tức sập 503 khi mạng chập chờn (ADR-020).
 _NETWORK_LEVEL_RETRYABLE = (httpx.ConnectError, httpx.TimeoutException)
 
 GENERATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 REQUEST_TIMEOUT = 60.0
 
+# Chỉ thị hệ thống ép LLM chỉ trả về duy nhất một đối tượng JSON và bắt buộc trích dẫn nguyên văn.
+# Tuyệt đối không sinh thêm bất kỳ lời dẫn hay văn bản giải thích nào ngoài định dạng JSON.
 SYSTEM_INSTRUCTION = (
     "Bạn là trợ lý nội bộ của công ty. Chỉ trả lời dựa trên các đoạn tài liệu được "
     "cung cấp dưới đây, không dùng kiến thức ngoài. Mọi khẳng định phải kèm chunk_id "
@@ -48,29 +45,32 @@ SYSTEM_INSTRUCTION = (
 )
 
 
+# 2. Khế Ước Dữ Liệu & Mô Hình Pydantic (Data Contract)
+
+
 class Citation(BaseModel):
+    """Trích dẫn căn cứ gồm mã định danh đoạn văn bản và câu văn nguyên văn tương ứng."""
+
     chunk_id: str = Field(min_length=1)
     quote: str = Field(min_length=1)
 
 
 class Answer(BaseModel):
+    """Mô hình dữ liệu câu trả lời của AI kèm danh sách trích dẫn và cờ từ chối."""
+
     answer: str = Field(min_length=1)
     citations: list[Citation]
     abstained: bool
-    # Giai đoạn báo cáo cuối (ADR-020): True khi model tự mâu thuẫn (abstained=true
-    # kèm citations) và
-    # citations bị bỏ để giữ tín hiệu abstained — xem model_validator bên dưới.
+    # Đánh dấu True nếu model tự mâu thuẫn (vừa từ chối vừa gửi citation) và đã được tự động sửa.
     self_contradiction_corrected: bool = False
 
     @model_validator(mode="after")
     def normalize_abstain_citations(self) -> "Answer":
-        """Model đôi khi trả abstained=true kèm citations còn sót — mâu thuẫn
-        trong chính output của model, không phải lỗi hệ thống (phát hiện qua
-        held-out H08, xem ADR-019). Trước đây raise ValueError ở đây khiến cả
-        response bị coi là sai schema, retry rồi 502 — dù tín hiệu "từ chối trả
-        lời" (abstained=true) là tín hiệu AN TOÀN, đáng tin hơn các citation thừa
-        đi kèm. Giữ abstained=true, bỏ citations thừa, và ghi lại đã sửa (không
-        âm thầm) để check_grounding() đưa vào grounding_problems."""
+        """Xử lý mâu thuẫn nội tại: model trả abstained=true nhưng vẫn đính kèm citations sót lại.
+
+        Thay vì raise SchemaFailure làm sập toàn bộ request với lỗi 502, ta ưu tiên tín hiệu an toàn
+        abstained=true, tự động dọn sạch citations thừa và ghi nhận cờ để Cổng 2 kiểm tra (ADR-019).
+        """
         if self.abstained and self.citations:
             self.citations = []
             self.self_contradiction_corrected = True
@@ -78,12 +78,12 @@ class Answer(BaseModel):
 
 
 class SchemaFailure(Exception):
-    """Response không qua được cổng schema sau khi đã thử lại."""
+    """Ngoại lệ khi phản hồi của LLM không khớp với cấu trúc JSON mong đợi sau số lần thử lại."""
 
 
 @dataclass
 class GroundedAnswer:
-    """Kết quả sau cả hai cổng: schema đạt, và biết rõ cổng bằng chứng có đạt không."""
+    """Kết quả hoàn chỉnh sau khi đi qua Cổng Schema (cấu trúc) và Cổng Grounding (bằng chứng)."""
 
     answer: Answer
     grounding_problems: list[str]
@@ -91,17 +91,20 @@ class GroundedAnswer:
     total_tokens: int = 0
 
 
+# 3. Xây Dựng Prompt & Chuẩn Hóa Chuỗi JSON (Prompt Engineering)
+
+
 def build_prompt(question: str, chunks: list[RetrievedChunk]) -> str:
+    """Ghép ngữ cảnh các đoạn tài liệu kèm chunk_id và câu hỏi người dùng thành prompt."""
     if not chunks:
-        # Không có chunk nào để đưa vào ngữ cảnh — không gọi model để nó tự bịa từ
-        # kiến thức nền. Trạng thái "0 đoạn" phải được xử lý TRƯỚC khi tới đây, xem
-        # answer_question(). Prompt này chỉ được build khi chunks không rỗng.
+        # Chặn đứng trường hợp danh sách chunk rỗng ngay từ đầu để tránh model tự suy diễn bịa đặt.
         raise ValueError("build_prompt không được gọi với danh sách chunk rỗng")
     lines = [f"[{c.chunk_id}] {c.chunk_text}" for c in chunks]
     return "Cac doan tai lieu:\n" + "\n".join(lines) + f"\n\nCau hoi: {question}"
 
 
 def _extract_json(raw: str) -> str:
+    """Bóc tách phần JSON thuần túy, loại bỏ các khối markdown code fence (```json ... ```)."""
     text = raw.strip()
     if "```" in text:
         start = text.find("```")
@@ -116,13 +119,15 @@ def _extract_json(raw: str) -> str:
     return text
 
 
-def _call_gemini(prompt: str) -> tuple[str, str | None, int]:
-    """Gọi Gemini, trả về (nội dung, finish_reason, total_tokens).
+# 4. Giao Tiếp LLM Gemini API Kèm Retry & Jitter
 
-    finish_reason được trả riêng vì một response rỗng do thinking ăn hết
-    max_output_tokens vẫn là HTTP 200 — phải đọc finish_reason mới biết, xem ADR-002.
-    total_tokens (giai đoạn báo cáo cuối) đọc từ usageMetadata.totalTokenCount —
-    dùng để báo chi phí thật trong docs/report.md thay vì ước lượng.
+
+def _call_gemini(prompt: str) -> tuple[str, str | None, int]:
+    """Gọi API sinh nội dung của Gemini với cơ chế Exponential Backoff + Jitter và hard timeout.
+
+    Returns:
+        tuple gồm (văn bản thô, lý do kết thúc finish_reason, tổng số token sử dụng).
+        Lý do kết thúc cần kiểm tra riêng vì thinking token có thể nuốt hết trần max_tokens.
     """
     settings = get_settings()
     payload = {
@@ -149,9 +154,7 @@ def _call_gemini(prompt: str) -> tuple[str, str | None, int]:
                 json=payload,
             )
         except _NETWORK_LEVEL_RETRYABLE as exc:
-            # Giai doan bao cao cuoi (ADR-020): timeout/connect that ket noi khong
-            # phai loi HTTP status, nen khong roi vao nhanh ben duoi - truoc day
-            # thoat ngay khong retry.
+            # Bắt lỗi rớt mạng hoặc timeout tầng socket để tiếp tục thử lại thay vì crash ngay.
             last_exc = exc
             response = None
         else:
@@ -171,13 +174,28 @@ def _call_gemini(prompt: str) -> tuple[str, str | None, int]:
 
     assert response is not None
     body = response.json()
+
+    # Ví dụ JSON Gemini trả về:
+    # body = {"candidates": [{"content": {"parts": [{"text": "abc"}]}}]}
+    #
+    # 1. body["candidates"][0] -> {"content": {"parts": [{"text": "abc"}]}}
     candidate = body["candidates"][0]
-    text = "".join(p.get("text", "") for p in candidate.get("content", {}).get("parts", []))
+
+    # 2. candidate.get("content", {}) -> {"parts": [{"text": "abc"}]}
+    # 3. .get("parts", [])            -> [{"text": "abc"}]
+    parts = candidate.get("content", {}).get("parts", [])
+
+    # 4. p.get("text", "") lấy "abc", join lại thành chuỗi hoàn chỉnh text = "abc"
+    text = "".join(p.get("text", "") for p in parts)
     total_tokens = body.get("usageMetadata", {}).get("totalTokenCount", 0)
     return text, candidate.get("finishReason"), total_tokens
 
 
+# 5. Hai Cổng Kiểm Duyệt Độc Lập (Schema Gate & Grounding Gate)
+
+
 def _parse_and_validate(raw: str, *, finish_reason: str | None) -> Answer:
+    """Cổng 1 (Schema Gate): Xác thực chuỗi JSON thô khớp chính xác với cấu trúc Pydantic."""
     if not raw.strip():
         raise SchemaFailure(f"response rỗng (finishReason={finish_reason})")
     try:
@@ -194,8 +212,10 @@ def _parse_and_validate(raw: str, *, finish_reason: str | None) -> Answer:
 
 
 def check_grounding(answer: Answer, allowed_chunk_ids: set[str]) -> list[str]:
-    """Cổng bằng chứng — chạy sau cổng schema. Không kiểm quote có thật trong chunk,
-    chỉ kiểm chunk_id có nằm trong ngữ cảnh đã đưa cho model hay không."""
+    """Cổng 2 (Grounding Gate): Kiểm tra tính căn cứ và nguồn gốc của các trích dẫn tài liệu.
+
+    Đảm bảo mọi chunk_id được trích dẫn đều nằm trong tập ngữ cảnh ban đầu đưa cho model.
+    """
     problems: list[str] = []
     if answer.self_contradiction_corrected:
         problems.append(
@@ -212,13 +232,16 @@ def check_grounding(answer: Answer, allowed_chunk_ids: set[str]) -> list[str]:
     return problems
 
 
+# 6. Bộ Điều Phối Sinh Câu Trả Lời (answer_question)
+
+
 def answer_question(
     question: str, chunks: list[RetrievedChunk], *, max_attempts: int = 2
 ) -> GroundedAnswer:
-    """Luồng đầy đủ: 0 chunk thì abstain thẳng, có chunk thì gọi model có thử lại.
+    """Điều phối toàn bộ quy trình: nếu 0 chunk thì từ chối ngay, có chunk thì gọi LLM có tự sửa.
 
-    Trần số lần thử: mỗi lượt gọi tốn tiền và tốn thời gian người dùng chờ, nên hết
-    lượt là raise, không bao giờ fallback sang văn bản tự do — xem ngày 19.
+    Quy tắc fail-fast: không có chunk liên quan thì từ chối (abstained=True) ngay lập tức mà không
+    gọi LLM, vừa tiết kiệm chi phí token vừa ngăn chặn hoàn toàn ảo giác (hallucination).
     """
     if not chunks:
         no_evidence = Answer(

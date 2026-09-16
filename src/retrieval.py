@@ -1,6 +1,4 @@
-"""Dense retrieval trên doc_chunks: lọc quyền và thời điểm trước, xếp hạng bằng
-embedding sau. Xem ADR-009 cho quyết định phạm vi quyền của docs retrieval.
-"""
+"""Module truy vấn tài liệu ngữ nghĩa (Dense Retrieval) bằng pgvector kết hợp lọc RBAC."""
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,8 +10,11 @@ from src.embeddings import embed
 from src.scope import visible_access_levels
 
 
+# 1. Retrieved Chunk Data Model
 @dataclass(frozen=True)
 class RetrievedChunk:
+    """Mô hình dữ liệu một đoạn văn bản được trích xuất từ cơ sở dữ liệu sau khi xếp hạng."""
+
     doc_id: str
     chunk_index: int
     chunk_text: str
@@ -23,29 +24,34 @@ class RetrievedChunk:
 
     @property
     def chunk_id(self) -> str:
+        """Mã định danh duy nhất của chunk theo cấu trúc: doc_id#chunk_index."""
         return f"{self.doc_id}#{self.chunk_index}"
 
 
+# 2. Dense Vector Retrieval with Pre-filtering & Point-in-Time
 def retrieve(
     question: str, *, role: str, as_of: datetime | None = None, k: int = 5
 ) -> list[RetrievedChunk]:
-    """Trả về top-k chunk trong phạm vi quyền của role, xếp theo cosine distance.
+    """Truy vấn top-k đoạn văn bản phù hợp nhất bằng khoảng cách cosine trong phạm vi quyền hạn.
 
-    Thứ tự bắt buộc: lọc quyền và thời điểm nằm trong WHERE, chạy TRƯỚC khi
-    PostgreSQL tính khoảng cách và sắp xếp — không lọc kết quả đã xếp hạng sau khi
-    trả về. Một chunk vượt quyền không bao giờ vào ứng viên, không phải bị cắt sau.
+    Nguyên tắc bảo mật & vận hành (ADR-009):
+    - Lọc quyền (Pre-filtering): Lọc access_level ngay trong mệnh đề WHERE của SQL TRƯỚC KHI tính
+      toán khoảng cách. Tuyệt đối không tính vector rồi mới lọc ở RAM (tránh rò rỉ tài liệu mật).
+    - Point-in-Time: Kiểm tra mốc khả dụng (available_at) và hiệu lực chính sách (effective dates).
+    - Ép kiểu tường minh %(qvec)s::vector để psycopg không bị nhầm sang mảng double precision[].
 
     Args:
-        role: Xác định tập access_level được thấy. Role lạ trả về danh sách rỗng ở
-            ``visible_access_levels``, nên WHERE ``access_level = ANY('{}')`` không
-            khớp gì — hệ thống không thấy chunk nào, không đoán quyền.
-        as_of: Thời điểm point-in-time. Mặc định là hiện tại — dùng để tái lập một
-            kết quả tại một mốc cụ thể trong test và trong lab.
-        k: Số chunk tối đa trả về. Không phải ngân sách token (đó là việc của bước
-           lập prompt); đây chỉ là số ứng viên đưa vào bước đó.
+        question: Câu hỏi ngôn ngữ tự nhiên của người dùng.
+        role: Chức vụ của người gọi để xác định tập access_level được phép xem.
+        as_of: Mốc thời gian hiệu lực (mặc định là hiện tại, dùng để tái lập kết quả trong test).
+        k: Số lượng chunk tối đa cần lấy.
+
+    Returns:
+        Danh sách RetrievedChunk được sắp xếp theo khoảng cách cosine tăng dần (gần nhất trước).
     """
     as_of = as_of or datetime.now(UTC)
     levels = visible_access_levels(role)
+    # Fail-closed: Role lạ không có quyền xem bất kỳ cấp độ nào -> Trả về rỗng ngay lập tức
     if not levels:
         return []
 

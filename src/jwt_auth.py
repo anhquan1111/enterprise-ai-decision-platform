@@ -1,24 +1,6 @@
-"""Cấp và xác minh JWT (ADR-028). Từ bước 3/3, `auth.py::authenticate()` gọi
-`verify_token()` ở đây để chấp nhận cả JWT lẫn API key — trước đó (bước 1-2/3),
-`/ask` vẫn xác thực bằng API key y hệt cũ, các hàm ở đây chỉ được gọi từ
-`POST /auth/token`.
+"""Cấp phát và xác minh JWT token (HS256) cho nhân viên phục vụ xác thực nhanh trên RAM."""
 
-Dùng HS256 (đối xứng) chứ không phải RS256: chỉ một service vừa cấp vừa xác minh
-token, không có bên thứ ba nào cần xác minh độc lập — bất đối xứng chỉ có ích khi
-việc ký và việc xác minh tách rời nhau giữa các bên, thêm nó bây giờ là độ phức tạp
-chưa cần dùng đến.
-
-Luôn truyền ``algorithms=[...]`` tường minh khi decode, không bao giờ để PyJWT tự
-đoán thuật toán từ header của token — đây là phòng vệ chống tấn công "algorithm
-confusion" (kẻ tấn công tự ký một token bằng thuật toán khác, ví dụ ``none``, hòng
-qua được bước xác minh).
-
-Import ``AuthenticatedEmployee``/``AuthenticationError`` từ ``src.identity``, KHÔNG
-phải từ ``src.auth`` — ``auth.py`` cần import ngược lại module này
-(``verify_token``) để hỗ trợ cả hai kiểu xác thực, nên lấy hai kiểu dữ liệu dùng
-chung từ một module trung lập là cách duy nhất tránh vòng import.
-"""
-
+# 1. Imports & Secret Validation
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -28,25 +10,20 @@ from src.identity import AuthenticatedEmployee, AuthenticationError
 
 
 def _require_secret() -> str:
+    """Kiểm tra và lấy secret key từ cấu hình; ném lỗi nếu chưa được thiết lập."""
     settings = get_settings()
     if not settings.jwt_secret_key:
         raise RuntimeError("JWT_SECRET_KEY rỗng — không thể ký/xác minh token. Kiểm tra .env.")
     return settings.jwt_secret_key
 
 
+# 2. Token Issuance (issue_token)
 def issue_token(employee: AuthenticatedEmployee) -> str:
-    """Ký một JWT mang danh tính đã xác thực — gọi SAU KHI đã xác minh employee bằng
-    một đường xác thực khác (API key hôm nay; bước 2/3 sẽ thêm endpoint phát hành).
-
-    Claims tối thiểu: ``sub`` (employee_id, đúng tên chuẩn JWT cho "subject"),
-    ``role``/``department`` (để RBAC đọc thẳng từ token, không cần tra lại DB mỗi
-    request — đổi lại: đổi role/department của một nhân viên sau khi token đã phát
-    hành sẽ không phản ánh cho tới khi token đó hết hạn, một đánh đổi có chủ ý của
-    JWT so với API key tra DB mỗi lần).
-    """
+    """Ký phát hành JWT token ngắn hạn (HS256) chứa danh tính và quyền hạn nhân viên."""
     settings = get_settings()
     secret = _require_secret()
     now = datetime.now(UTC)
+    # Claims: sub (ID nhân viên), role/dept (để RBAC đọc thẳng trên RAM), exp (hạn 60m)
     payload = {
         "sub": employee.employee_id,
         "role": employee.role,
@@ -57,14 +34,13 @@ def issue_token(employee: AuthenticatedEmployee) -> str:
     return jwt.encode(payload, secret, algorithm=settings.jwt_algorithm)
 
 
+# 3. Token Verification (verify_token)
 def verify_token(token: str) -> AuthenticatedEmployee:
-    """Xác minh chữ ký + hạn dùng, trả về danh tính. Mọi lỗi (hết hạn, sai chữ ký,
-    thiếu claim, token hỏng) đều gộp thành ``AuthenticationError`` — cùng loại lỗi
-    API key trả ra, để tầng gọi (``authenticate()``, bước 3/3) xử lý một cách thống
-    nhất bất kể xác thực bằng phương thức nào."""
+    """Xác minh chữ ký và thời hạn JWT trong RAM; truyền algorithms rõ ràng chống giả mạo."""
     settings = get_settings()
     secret = _require_secret()
     try:
+        # Luôn truyền algorithms=[...] tường minh để chống tấn công Algorithm Confusion (alg: none)
         payload = jwt.decode(token, secret, algorithms=[settings.jwt_algorithm])
     except jwt.PyJWTError as exc:
         raise AuthenticationError("token khong hop le hoac da het han") from exc

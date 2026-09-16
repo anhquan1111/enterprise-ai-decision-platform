@@ -1,19 +1,13 @@
-"""Contract request/response của endpoint /ask.
-
-Đây là biên của hệ thống. Hai thứ được tách riêng có chủ ý:
-
-* **Schema hợp lệ** — Pydantic kiểm (hình dạng, kiểu, tập giá trị cho phép).
-* **Nội dung đúng** — KHÔNG kiểm ở đây. Một response có thể đúng schema mà vẫn trả
-  lời sai; đó là việc của bộ đánh giá ở giai đoạn retrieval nền tảng.
-"""
+"""Hợp đồng dữ liệu (Data Contracts) Pydantic cho Request/Response của API."""
 
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
+# ── 1. Danh mục nghiệp vụ (Enums) ──────────────────────
 class Role(StrEnum):
-    """Vai trò của người gọi. Quyết định dòng dữ liệu và tài liệu nào được thấy."""
+    """Vai trò người dùng, quyết định phạm vi tài liệu và số liệu được phép truy cập."""
 
     EMPLOYEE = "employee"
     MANAGER = "manager"
@@ -21,7 +15,7 @@ class Role(StrEnum):
 
 
 class Department(StrEnum):
-    """Phòng ban của người gọi."""
+    """Phòng ban của người gọi, dùng để phân quyền truy vấn số liệu kinh doanh."""
 
     SALES = "sales"
     HR = "hr"
@@ -30,7 +24,7 @@ class Department(StrEnum):
 
 
 class ToolUsed(StrEnum):
-    """Nguồn bằng chứng của câu trả lời."""
+    """Nguồn bằng chứng được hệ thống sử dụng để trả lời."""
 
     SQL = "sql"
     DOCS = "docs"
@@ -38,12 +32,9 @@ class ToolUsed(StrEnum):
     NONE = "none"
 
 
+# ── 2. Hợp đồng hỏi đáp (/ask) ────────────────────────
 class AskRequest(BaseModel):
-    """Câu hỏi kèm danh tính người gọi.
-
-    Role và department nằm trong request chứ không suy ra về sau, vì mọi truy cập
-    dữ liệu phía dưới đều bị giới hạn theo hai trường này.
-    """
+    """Dữ liệu câu hỏi kèm danh tính người gọi gửi lên API /ask."""
 
     user_id: str = Field(min_length=1, max_length=64, examples=["emp_042"])
     role: Role
@@ -52,36 +43,33 @@ class AskRequest(BaseModel):
 
 
 class Citation(BaseModel):
-    """Một bằng chứng cho một khẳng định trong câu trả lời.
-
-    Citation phải trỏ tới thứ truy lại được: một chunk tài liệu, hoặc chính câu SQL
-    đã tạo ra con số. Không có nó thì câu trả lời không kiểm chứng được, và câu trả
-    lời không kiểm chứng được bị coi là thất bại.
-    """
+    """Bằng chứng trích dẫn cụ thể chứng minh cho câu trả lời."""
 
     source_type: ToolUsed
-    # Citation tài liệu điền doc_id/chunk_index/quote; citation số liệu điền sql.
+    # Nếu là tài liệu: điền doc_id, chunk_index và đoạn trích dẫn nguyên văn (quote)
     doc_id: str | None = None
     chunk_index: int | None = None
-    quote: str | None = None
+    quote: str | None = None  # Đoạn trích nguyên văn từ tài liệu gốc làm bằng chứng đối chiếu
+    # Nếu là số liệu kinh doanh: điền câu lệnh SQL đã chạy sinh ra con số
     sql: str | None = None
 
 
 class AskResponse(BaseModel):
-    """Câu trả lời có cấu trúc trả về cho người gọi."""
+    """Câu trả lời hoàn chỉnh có cấu trúc trả về cho người dùng."""
 
+    # Mã UUIDv4 sinh ngẫu nhiên khi request chạm vào API, dùng truy vết và tra cứu audit_log
     request_id: str
     answer: str
     citations: list[Citation]
     tool_used: ToolUsed
-    # True khi hệ thống từ chối trả lời vì bằng chứng trong phạm vi quyền không đủ.
-    # Từ chối là kết quả đúng, không phải lỗi.
+    # Trả về True nếu hệ thống từ chối trả lời (do ngoài quyền hạn hoặc không có dữ liệu đối chiếu)
     abstained: bool
     latency_ms: int
 
 
+# ── 3. Hợp đồng hệ thống & Xác thực ───────────────────
 class HealthResponse(BaseModel):
-    """Liveness: process còn sống. Không nói gì về dependency."""
+    """Liveness probe: kiểm tra tiến trình server còn sống (/health)."""
 
     status: str
     app: str
@@ -90,20 +78,18 @@ class HealthResponse(BaseModel):
 
 
 class ReadyResponse(BaseModel):
-    """Readiness: process thật sự phục vụ được request."""
+    """Readiness probe: kiểm tra server đã kết nối DB và sẵn sàng phục vụ (/ready)."""
 
     ready: bool
     checks: dict[str, str]
 
 
 class TokenResponse(BaseModel):
-    """Kết quả của POST /auth/token — đổi một API key hợp lệ lấy một JWT ngắn hạn.
+    """Khuôn mẫu dữ liệu trả về khi đăng nhập thành công tại POST /auth/token.
 
-    Đặt tên field theo đúng quy ước OAuth2 (``access_token``/``token_type``/
-    ``expires_in``, RFC 6749 §5.1) dù đây không phải OAuth2 đầy đủ — quy ước quen
-    thuộc, không cần bịa tên field riêng.
+    Theo chuẩn OAuth2 (RFC 6749): Trả về vé JWT ngắn hạn để client dùng cho các request sau.
     """
 
-    access_token: str
-    token_type: str = "bearer"
-    expires_in: int
+    access_token: str  # Chuỗi vé JWT đã được server ký số bằng secret key
+    token_type: str = "bearer"  # Loại token theo chuẩn RFC 6750 (người cầm vé có quyền truy cập)
+    expires_in: int  # Thời gian sống của vé tính bằng giây (ví dụ 3600 = 60 phút)

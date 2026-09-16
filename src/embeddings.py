@@ -1,10 +1,4 @@
-"""Gọi Gemini embedding API — một hàm duy nhất, dùng chung cho ingestion và truy vấn.
-
-Một nguồn sự thật cho việc embed là điều kiện bắt buộc: nếu chunk được embed bằng một
-cách chuẩn hóa và câu hỏi được embed bằng cách khác, hai vector nằm ở hai không gian
-khác nhau — cosine similarity vẫn ra số, nhưng con số đó vô nghĩa. Đây đúng là rủi ro
-train/serve skew đã nói ở Ngày 7 file 1 mục 5, áp cho embedding.
-"""
+"""Module gọi Gemini Embedding API phục vụ vector hóa tài liệu và câu hỏi tìm kiếm."""
 
 import random
 import time
@@ -14,19 +8,13 @@ import httpx
 
 from src.config import get_settings
 
+# 1. Constants & Network Resilience Configuration
 EMBED_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent"
 
-# Timeout cho mỗi lần gọi. Không đặt thì theo đúng ADR-005: một request treo sẽ chờ vô
-# hạn thay vì báo lỗi.
+# Timeout cứng chống treo kết nối vô hạn theo ADR-005
 REQUEST_TIMEOUT = 30.0
 
-# Giai đoạn báo cáo cuối (ADR-024): retry/backoff/jitter y hệt generation.py và
-# router.py — gap thật phát hiện khi chạy held-out v2: embeddings.py trước đây không
-# hề retry, và agent/loop.py's _retry() chỉ bắt lỗi mạng (ConnectError/Timeout), không
-# bắt HTTPStatusError, nên MỌI câu hỏi cần docs retrieval chỉ cần một lần 503 thoáng
-# qua từ gemini-embedding-001 là chết hẳn, trong khi câu hỏi sql-only (không gọi
-# embedding) vẫn qua bình thường cùng lúc đó — bất đối xứng độ tin cậy không có lý do
-# chính đáng nào giữa hai đường LLM call.
+# Các mã lỗi HTTP tạm thời từ Gemini API cho phép thử lại (ADR-024)
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 _NETWORK_RETRY_ATTEMPTS = 3
 _NETWORK_RETRY_BACKOFF_S = 1.0
@@ -36,14 +24,19 @@ _NETWORK_LEVEL_RETRYABLE = (httpx.ConnectError, httpx.TimeoutException)
 TaskType = Literal["RETRIEVAL_DOCUMENT", "RETRIEVAL_QUERY"]
 
 
+# 2. Embedding Client with Exponential Backoff & Jitter
 def embed(text: str, *, task_type: TaskType) -> list[float]:
-    """Trả về vector nhúng của một đoạn văn bản, đúng số chiều đã chốt ở ADR-002.
+    """Tạo vector nhúng ngữ nghĩa của văn bản với số chiều thu gọn (Matryoshka 384D).
 
     Args:
-        text: Văn bản cần embed — nội dung chunk lúc ingest, hoặc câu hỏi lúc truy vấn.
-        task_type: Gemini tối ưu vector khác nhau tùy văn bản là tài liệu để lưu hay
-            câu hỏi để tìm. Dùng sai loại không gây lỗi cú pháp, chỉ làm similarity
-            kém chính xác hơn — một lớp lỗi âm thầm, giống hệt tinh thần ADR cũ.
+        text: Nội dung văn bản (đoạn chunk khi nạp tài liệu hoặc câu hỏi khi truy vấn).
+        task_type: Loại tác vụ nhúng:
+            - RETRIEVAL_DOCUMENT: Tối ưu cho văn bản tài liệu lưu vào kho.
+            - RETRIEVAL_QUERY: Tối ưu cho câu hỏi tìm kiếm của người dùng.
+            Lưu ý: Dùng sai loại không báo lỗi cú pháp nhưng sẽ làm giảm độ chính xác tương đồng.
+
+    Returns:
+        Danh sách số thực biểu diễn vector 384 chiều chuẩn hóa.
     """
     settings = get_settings()
     if not settings.llm_api_key:
@@ -52,6 +45,7 @@ def embed(text: str, *, task_type: TaskType) -> list[float]:
     payload = {
         "content": {"parts": [{"text": text}]},
         "taskType": task_type,
+        # Matryoshka 384D: Cắt gọn vector để tiết kiệm 50% RAM/Disk Postgres và tăng tốc truy vấn
         "outputDimensionality": settings.embedding_dim,
     }
 
@@ -69,29 +63,33 @@ def embed(text: str, *, task_type: TaskType) -> list[float]:
                 json=payload,
             )
         except _NETWORK_LEVEL_RETRYABLE as exc:
+            # Khi đứt mạng/timeout: lưu lỗi vào last_exc và cho phép đi tiếp để thử lại
             last_exc = exc
             response = None
         else:
+            # Mạng thông: 200/4xx dừng ngay (break/raise); 429/503 tạm thời thì lưu để thử lại
             if response.status_code not in _RETRYABLE_STATUS:
                 response.raise_for_status()
                 break
             last_exc = httpx.HTTPStatusError(
                 f"{response.status_code} tạm thời", request=response.request, response=response
             )
+
         if attempt < _NETWORK_RETRY_ATTEMPTS - 1:
+            # Backoff + Jitter: ngủ 1s, 2s... kèm độ trễ ngẫu nhiên (0-0.5s) chống bão request
             time.sleep(
                 _NETWORK_RETRY_BACKOFF_S * (2**attempt) + random.uniform(0, _NETWORK_RETRY_JITTER_S)
             )
     else:
+        # Cú pháp for...else: chỉ chạy khi thử hết cả 3 lần đều thất bại (không gặp lệnh break)
         assert last_exc is not None
         raise last_exc
 
     assert response is not None
+    # Trả về mảng số thực vector 384 chiều bóc tách từ JSON
     values: list[float] = response.json()["embedding"]["values"]
 
     if len(values) != settings.embedding_dim:
-        # Không im lặng chấp nhận: một vector sai số chiều sẽ bị PostgreSQL từ chối ở
-        # ranh giới cột vector(384), nhưng báo lỗi ở đây sớm hơn và rõ ràng hơn.
         raise ValueError(
             f"Gemini trả về {len(values)} chiều, contract yêu cầu {settings.embedding_dim}"
         )

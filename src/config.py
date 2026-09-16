@@ -1,9 +1,4 @@
-"""Cấu hình ứng dụng, đọc từ biến môi trường và .env.
-
-Mọi setting có giá trị mặc định cho môi trường local nên app chạy được khi chưa có
-.env. Riêng secret (LLM_API_KEY) mặc định là rỗng chứ không phải một giá trị giả:
-thiếu key thì phải lỗi rõ ràng, không phải lỗi auth khó hiểu.
-"""
+"""Cấu hình ứng dụng tập trung (Single Source of Truth), nạp từ biến môi trường và file .env."""
 
 from functools import lru_cache
 
@@ -11,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Setting dùng chung cho API và các script offline."""
+    """Setting dùng chung cho FastAPI server, scripts và database migrations."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -19,75 +14,55 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── App ───────────────────────────────────────────────
-    app_name: str = "enterprise-ai-decision-platform"
+    # ── 1. App Metadata ──────────────────────────────────
+    app_name: str = "enterprise-ai-decision-platform"  # Tên hiển thị trên Swagger UI (/docs)
     app_version: str = "0.1.0"
     environment: str = "local"
     log_level: str = "INFO"
 
-    # ── PostgreSQL ─────────────────────────────────────────
-    # Dùng 127.0.0.1 chứ không phải "localhost": trên Windows localhost resolve ::1
-    # trước, mà compose chỉ publish port trên IPv4, nên mỗi connection phải trả giá
-    # cho một lần thử IPv6 thất bại. Xem ADR-005.
+    # ── 2. PostgreSQL & Connection Pool ──────────────────
+    # Dùng 127.0.0.1 thay vì localhost để tránh bị phạt 5s timeout IPv6 trên Windows (ADR-005)
     postgres_host: str = "127.0.0.1"
-    postgres_port: int = 5433
+    postgres_port: int = 5433  # Cổng 5433 để tránh trùng cổng Postgres mặc định (5432)
     postgres_db: str = "enterprise_ai"
     postgres_user: str = "app"
     postgres_password: str = "app_local_only"
-    # Số giây libpq chờ cho MỖI địa chỉ đã resolve. Thiếu tham số này thì mặc định
-    # là chờ vô hạn, biến "database không tới được" thành treo thay vì lỗi. ADR-005.
+    # Timeout khi MỞ kết nối: tối đa 5s, tránh ứng dụng bị treo vô hạn nếu DB sập
     postgres_connect_timeout: int = 5
-    # Server-side: PostgreSQL tự huỷ một CÂU LỆNH chạy quá lâu, dù connection đã mở
-    # thành công (connect_timeout ở trên không bảo vệ được việc này — nó chỉ canh
-    # lúc MỞ connection). Thiếu nó, một câu SQL bất thường (kể cả do LLM sinh ra ở
-    # giai đoạn agent routing) có thể treo vô hạn phía server. Ngày 25 (vault) đã ghi
-    # đây là một khoảng trống thật, giai đoạn xác thực & độ tin cậy vá lại. 5s vì mọi
-    # truy vấn hiện tại đều đơn giản (giai đoạn retrieval nền tảng/agent routing).
+    # Timeout khi CHẠY câu SQL: server tự hủy câu lệnh nếu chạy quá 5s để chống treo DB
     postgres_statement_timeout_ms: int = 5000
-    # Connection pool (giai đoạn xác thực & độ tin cậy) — thay vì mở connection mới
-    # mỗi request (ADR-005 gốc chỉ nói timeout, chưa nói pool). Kích thước nhỏ vì
-    # corpus/traffic hiện tại nhỏ; tăng khi đo thấy cần, không đoán trước.
+    # Connection Pool: tối thiểu 1 kết nối sẵn sàng, tối đa 10 kết nối đồng thời để chống quá tải DB
     postgres_pool_min_size: int = 1
     postgres_pool_max_size: int = 10
 
-    # ── LLM: đã chốt ở ADR-002 ────────────────────────────
+    # ── 3. LLM (Gemini) ──────────────────────────────────
     llm_provider: str = "google"
-    # Pin phiên bản cụ thể, KHÔNG dùng alias "-latest": alias đổi model dưới chân bạn
-    # và làm mọi số đo cũ không so được với số mới.
+    # Cố định phiên bản, không dùng alias "-latest" để kết quả đo đạc luôn nhất quán (ADR-002)
     llm_model: str = "gemini-3.1-flash-lite"
-    llm_api_key: str = ""
+    llm_api_key: str = ""  # Mặc định rỗng để fail-fast, bắt buộc nạp từ .env
 
-    # ── Embedding: đã chốt ở ADR-002 ──────────────────────
+    # ── 4. Embedding ─────────────────────────────────────
     embedding_backend: str = "api"
     embedding_model: str = "gemini-embedding-001"
-    # 384 chiều là do Matryoshka truncation (outputDimensionality), không phải chiều
-    # gốc của model — gốc là 3072. Chọn 384 để giữ nguyên cột vector(384) của schema.
+    # Cắt vector từ 3072D gốc xuống 384D (Matryoshka) để tối ưu tốc độ và dung lượng pgvector
     embedding_dim: int = 384
 
-    # Gemini 3.x bật "thinking" mặc định và thinking token TRỪ VÀO max_output_tokens.
-    # Đặt quá thấp thì response rỗng với finishReason=MAX_TOKENS. Xem ADR-002.
+    # Ngân sách token đầu ra (Gemini 3.x trừ cả thinking tokens vào đây, ~400-600 từ tiếng Việt)
     llm_max_output_tokens: int = 1200
 
-    # ── Retrieval ──────────────────────────────────────────
-    retrieval_top_k: int = 5
-    # Hằng số của Reciprocal Rank Fusion: score = sum(1 / (rrf_k + rank)).
-    # 60 là giá trị trong paper gốc, làm dịu trọng số của các hạng đầu để một
-    # engine không áp đảo danh sách sau khi trộn.
-    rrf_k: int = 60
+    # ── 5. Retrieval ──────────────────────────────────────
+    retrieval_top_k: int = 5  # Lấy top 5 chunk tài liệu tương đồng nhất
+    rrf_k: int = 60  # Hằng số làm mượt của RRF, dự phòng khi kích hoạt Hybrid Search
 
-    # ── JWT (bổ sung sau báo cáo cuối) ──────────────────────
-    # Rỗng mặc định, giống llm_api_key: thiếu secret phải lỗi rõ ràng lúc issue/verify,
-    # không phải âm thầm ký bằng một giá trị giả đoán trước được.
-    jwt_secret_key: str = ""
+    # ── 6. JWT Authentication ────────────────────────────
+    jwt_secret_key: str = ""  # Khóa bí mật dùng để ký token HS256 (bắt buộc nạp từ .env)
     jwt_algorithm: str = "HS256"
-    jwt_expiry_minutes: int = 60
+    jwt_expiry_minutes: int = 60  # Thời gian sống của vé JWT (hết hạn sau 60 phút)
 
     @property
     def database_url(self) -> str:
-        """Connection string cho psycopg.
-
-        Luôn kèm connect_timeout: database không tới được phải lỗi trong thời gian
-        có giới hạn, không được chặn caller vô hạn.
+        """Tự động ráp thành Connection URI chuẩn, luôn kèm connect_timeout
+        và statement_timeout.
         """
         return (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
@@ -99,9 +74,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Trả về object setting dùng chung cho cả process.
-
-    Cache lại để mỗi module import không phải đọc lại environment. Test muốn đổi
-    biến môi trường thì gọi ``get_settings.cache_clear()``.
-    """
+    """Singleton cache: chỉ đọc và parse .env đúng một lần khi khởi động để tối ưu hiệu năng."""
     return Settings()

@@ -1,11 +1,4 @@
-"""Giai doan xac thuc & do tin cay: ghi audit_log - bang da ton tai tu giai doan tang
-du lieu, chua tung duoc ghi vao cho toi bay gio.
-
-Ghi audit KHONG duoc lam sap request cua nguoi dung: neu ghi log that bai (vd DB
-tam thoi khong toi duoc), request van phai tra loi binh thuong - chi log loi ra
-console. Day la lua chon co chu y, ghi lai ly do trong ADR: audit phuc vu tuan thu/
-quan sat, khong phai duong di bat buoc de tra loi duoc cau hoi.
-"""
+"""Module ghi nhận nhật ký kiểm toán (audit log) phục vụ giám sát và tuân thủ bảo mật."""
 
 import logging
 from dataclasses import dataclass
@@ -16,8 +9,11 @@ from src.db import get_connection
 logger = logging.getLogger(__name__)
 
 
+# 1. Audit Entry Data Model
 @dataclass(frozen=True)
 class AuditEntry:
+    """Mô hình dữ liệu một bản ghi kiểm toán sau khi xử lý xong câu hỏi của người dùng."""
+
     request_id: UUID
     user_id: str
     role: str
@@ -31,9 +27,16 @@ class AuditEntry:
     total_tokens: int | None = None
 
 
+# 2. Audit Record Dispatcher
 def record(entry: AuditEntry) -> None:
-    """Ghi mot dong audit. Khong raise ra ngoai - loi ghi log chi duoc log lai, xem
-    docstring module ve ly do."""
+    """Ghi nhận thông tin kiểm toán vào bảng audit_log theo cơ chế Fail-open.
+
+    Triết lý thiết kế (ADR-017):
+    - Ghi audit nhằm phục vụ quan sát, điều tra và tính cước, KHÔNG phải luồng xử lý chính.
+    - Nếu Database audit bị nghẽn mạng hoặc lỗi, hàm chỉ ghi log cảnh báo ra console và
+      TUYỆT ĐỐI KHÔNG quăng ngoại lệ làm sập request hay chặn người dùng nhận câu trả lời.
+    - Bắt buộc truyền read_only=False vì mặc định get_connection() luôn khóa ghi (defense-in-depth).
+    """
     try:
         with get_connection(read_only=False) as conn, conn.cursor() as cur:
             cur.execute(
