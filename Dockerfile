@@ -18,10 +18,17 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY src/ ./src/
 COPY sql/ ./sql/
+# Migration tooling (ADR-025) — cần cả 2 để "alembic upgrade head" chạy được lúc
+# container khởi động (xem docker/entrypoint.sh), kể cả trên Render free tier vốn
+# không hỗ trợ Pre-Deploy Command riêng (docs/deploy_render.md).
+COPY alembic.ini ./alembic.ini
+COPY alembic/ ./alembic/
 # Giao diện demo tĩnh (/ui) — HTML/CSS/JS thuần, không build step. StaticFiles đòi
 # thư mục này TỒN TẠI ngay lúc app khởi động (app.mount trong src/api.py), thiếu
 # COPY này thì container crash ngay khi start, không phải lỗi 404 êm ái. ADR-029.
 COPY web/ ./web/
+COPY docker/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -34,8 +41,4 @@ EXPOSE 8010
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')" || exit 1
 
-CMD ["uv", "run", "--no-sync", "uvicorn", "src.api:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8010", \
-     "--workers", "1", \
-     "--log-level", "info"]
+CMD ["./entrypoint.sh"]

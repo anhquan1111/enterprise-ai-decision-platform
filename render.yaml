@@ -17,10 +17,10 @@ services:
     dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /health
-    # Idempotent: op.execute các bảng dùng "CREATE TABLE" không "IF NOT EXISTS" ở
-    # baseline, nhưng alembic tự kiểm bảng alembic_version nên chạy lại vẫn an toàn
-    # (không có gì để upgrade nếu đã ở head).
-    preDeployCommand: "uv run --no-sync alembic upgrade head"
+    # KHÔNG dùng preDeployCommand: Render báo lỗi "not supported for free tier
+    # services". Thay vào đó, docker/entrypoint.sh chạy "alembic upgrade head"
+    # ngay khi container khởi động, trước khi start uvicorn — hoạt động trên mọi
+    # gói, kể cả free.
     envVars:
       - key: ENVIRONMENT
         value: production

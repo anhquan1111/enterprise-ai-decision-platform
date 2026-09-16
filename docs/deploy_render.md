@@ -17,9 +17,12 @@ chạy bằng Docker (`Dockerfile` có sẵn, không cần viết thêm gì). Ph
      `.env`).
    - `JWT_SECRET_KEY`: sinh mới, không dùng lại key ở local
      (`python -c "import secrets; print(secrets.token_urlsafe(32))"`).
-4. Đợi build xong. `preDeployCommand: uv run --no-sync alembic upgrade head`
-   trong `render.yaml` tự tạo schema (bảng + extension `vector`/`pg_trgm`) —
-   không cần chạy tay bước này.
+4. Đợi build xong. `docker/entrypoint.sh` tự chạy `alembic upgrade head` ngay
+   khi container khởi động (trước khi start server) để tạo schema (bảng +
+   extension `vector`/`pg_trgm`) — không cần chạy tay bước này. (Render báo lỗi
+   nếu khai báo việc này qua `preDeployCommand` trong `render.yaml`: tính năng đó
+   không hỗ trợ ở gói free, nên thay bằng cách chạy ngay trong entrypoint của
+   container — hoạt động trên mọi gói.)
 
 Sau bước 4, service đã **chạy được** (`/health` trả `200`), nhưng `/ui` sẽ trả
 lời rỗng/abstain cho mọi câu hỏi vì `monthly_revenue` chưa có dữ liệu và
